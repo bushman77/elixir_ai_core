@@ -1,6 +1,7 @@
 {application,elixir_ai_core,
              [{modules,['Elixir.ElixirAiCore',
                         'Elixir.ElixirAiCore.Application',
+                        'Elixir.ElixirAiCore.Core',
                         'Elixir.ElixirAiCore.ModelServer',
                         'Elixir.ElixirAiCore.Tokenizer']},
               {optional_applications,[]},

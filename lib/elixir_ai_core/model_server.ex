@@ -4,6 +4,7 @@ defmodule ElixirAiCore.ModelServer do
   """
 
   use GenServer
+  alias ElixirAiCore.Core
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
@@ -26,7 +27,7 @@ defmodule ElixirAiCore.ModelServer do
   end
 
   def handle_call({:infer, input}, _from, state) do
-    output = {:error, :no_model_loaded}
+    output = Core.infer(input)
     {:reply, output, state}
   end
 end
