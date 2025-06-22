@@ -26,8 +26,13 @@ defmodule ElixirAiCore.ModelServer do
     {:reply, :ok, Map.put(state, :model, model_data)}
   end
 
+  def handle_call({:infer, _input}, _from, %{model: nil} = state) do
+    {:reply, {:error, :no_model_loaded}, state}
+  end
+
   def handle_call({:infer, input}, _from, state) do
-    output = Core.infer(input)
+    # Delegate inference logic to Core, passing current model (or nil)
+    output = Core.infer(state.model, input)
     {:reply, output, state}
   end
 end

@@ -1,0 +1,30 @@
+# --- Elixir build and artifacts ---
+_build/
+deps/
+erl_crash.dump
+
+# --- Mix and Hex packages ---
+.coverage/
+mix.lock        # Ignored to keep life agnostic
+
+# --- Editor and OS files ---
+*.swp
+*.swo
+*~
+.DS_Store
+.Trash-*
+.vscode/
+.idea/
+.elixir_ls/
+
+# Test output
+/test/tmp/
+test/tmp/
+
+# Logs
+/log/
+*.log
+
+# Misc
+*.beam
+
