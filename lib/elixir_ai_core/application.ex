@@ -4,6 +4,8 @@ defmodule ElixirAiCore.Application do
   def start(_type, _args) do
     children = [
       # Add workers here if needed
+      {Registry, keys: :unique, name: BrainCell.Registry},
+      BrainCell.Supervisor
     ]
 
     opts = [strategy: :one_for_one, name: ElixirAiCore.Supervisor]

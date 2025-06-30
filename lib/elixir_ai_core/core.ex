@@ -30,4 +30,11 @@ defmodule ElixirAiCore.Core do
 
   #
   def infer(_model, _invalid_input), do: {:error, :invalid_input}
+
+  @doc "Clamps a float value between min and max."
+  def clamp(val), do: clamp(val, 0.0, 2.0)
+  @spec clamp(float(), float(), float()) :: float()
+  def clamp(val, min, max) when is_float(val) and is_float(min) and is_float(max) do
+    val |> max(min) |> min(max)
+  end
 end
