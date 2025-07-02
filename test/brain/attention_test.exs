@@ -64,11 +64,39 @@ defmodule Brain.AttentionTest do
       k = Nx.tensor([[1.0, 0.0], [0.0, 1.0]])
       v = Nx.tensor([[10.0, 0.0], [0.0, 5.0]])
 
-      low_dop = Brain.Attention.debug_softmax(q, k, 0.5)
-      high_dop = Brain.Attention.debug_softmax(q, k, 2.0)
+      low_dop = Brain.Attention.debug_softmax(q, k, 0.5, 1.0)
+      high_dop = Brain.Attention.debug_softmax(q, k, 2.0, 1.0)
 
       low_weights = low_dop[:weights]
       high_weights = high_dop[:weights]
+
+      low_diff =
+        low_weights
+        |> Nx.reduce_max(axes: [1])
+        |> Nx.subtract(Nx.reduce_min(low_weights, axes: [1]))
+        |> Nx.to_flat_list()
+        |> hd()
+
+      high_diff =
+        high_weights
+        |> Nx.reduce_max(axes: [1])
+        |> Nx.subtract(Nx.reduce_min(high_weights, axes: [1]))
+        |> Nx.to_flat_list()
+        |> hd()
+
+      assert high_diff > low_diff
+    end
+
+    test "increased serotonin flattens attention distribution" do
+      q = Nx.tensor([[1.0, 0.0]])
+      k = Nx.tensor([[1.0, 0.0], [0.0, 1.0]])
+      v = Nx.tensor([[10.0, 0.0], [0.0, 5.0]])
+
+      low_ser = Brain.Attention.debug_softmax(q, k, 1.0, 0.5, 1.0)
+      high_ser = Brain.Attention.debug_softmax(q, k, 1.0, 2.0, 1.0)
+
+      low_weights = low_ser[:weights]
+      high_weights = high_ser[:weights]
 
       low_diff =
         low_weights

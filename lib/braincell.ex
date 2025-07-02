@@ -40,8 +40,8 @@ defmodule BrainCell do
   ]
 
   # Public API
-  def start_link(id) do
-    GenServer.start_link(__MODULE__, id, name: via(id))
+  def start_link(%{id: id} = args) do
+      GenServer.start_link(__MODULE__, args, name: via(id))
   end
 
   def via(id), do: {:via, Registry, {BrainCell.Registry, id}}
@@ -53,8 +53,8 @@ defmodule BrainCell do
   def state(id), do: GenServer.call(via(id), :get_state)
 
   # Server Callbacks
-  def init(id) do
-    state = Brain.get(id) || %BrainCell{id: id, position: {0.0, 0.0, 0.0}, activation: 0.0}
+  def init(%{id: id}) do
+    state = Brain.get(Brain, id) || %BrainCell{id: id, position: {0.0, 0.0, 0.0}, activation: 0.0}
     {:ok, state}
   end
 
@@ -62,7 +62,7 @@ defmodule BrainCell do
 
   def handle_cast({:fire, strength}, state) do
     Logger.debug("Firing cell #{state.id} with strength #{Float.round(strength, 3)}")
-    Brain.put(state)
+    Brain.put(Brain, state)
 
     Enum.each(state.connections, fn conn ->
       new_strength = strength * conn.weight
