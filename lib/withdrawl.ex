@@ -31,7 +31,7 @@ defmodule BrainCell.Withdrawal do
   defp withdrawal_delay(_), do: 10 * 60
 
   defp apply_withdrawal_effect(%BrainCell{last_substance: nil} = cell, _substance) do
-    Logger.warn("Withdrawal attempted with no substance; skipping.")
+    Logger.warning("Withdrawal attempted with no substance; skipping.")
     cell
   end
 

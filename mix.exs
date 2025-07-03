@@ -8,6 +8,7 @@ defmodule ElixirAiCore.MixProject do
       elixir: "~> 1.18",
       elixirc_options: [warnings_as_errors: false],
       elixirc_paths: ["lib", "test"],
+      aliases: aliases(),
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
@@ -24,6 +25,12 @@ defmodule ElixirAiCore.MixProject do
     [
       {:nx, "~> 0.5.1"},
       {:axon, "~> 0.5.1"}
+    ]
+  end
+
+  defp aliases do
+    [
+      seed: ["run priv/seed_phrases.exs"]
     ]
   end
 end
