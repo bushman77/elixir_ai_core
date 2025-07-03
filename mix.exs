@@ -8,6 +8,7 @@ defmodule ElixirAiCore.MixProject do
       elixir: "~> 1.18",
       elixirc_options: [warnings_as_errors: false],
       elixirc_paths: ["lib", "test"],
+      config_path: "config/config.exs",
       aliases: aliases(),
       start_permanent: Mix.env() == :prod,
       deps: deps()

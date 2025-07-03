@@ -3,6 +3,7 @@ defmodule ElixirAiCore.Application do
 
   def start(_type, _args) do
     children = [
+      ElixirAiCore.POSTagger,
       {Registry, keys: :unique, name: BrainCell.Registry},
       ElixirAiCore.Supervisor,
       {Brain, name: Brain}

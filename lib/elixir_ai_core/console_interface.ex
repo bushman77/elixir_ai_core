@@ -18,7 +18,6 @@ defmodule ElixirAiCore.ConsoleInterface do
       IO.gets("> ")
       |> to_string()
       |> String.trim()
-      |> String.downcase()
 
     case input do
       "" ->
@@ -30,27 +29,35 @@ defmodule ElixirAiCore.ConsoleInterface do
         :init.stop()
 
       _ ->
-        words = String.split(input)
+        # STEP 1: Tag the input
+        tagged = ElixirAiCore.POSTagger.tag_sentence(input)
 
-        # Teach the brain with input
+        # STEP 2: Parse sentence structure
+        case ElixirAiCore.SentenceStructureParser.parse_tagged_sentence(tagged) do
+          {:ok, structure_info} ->
+            IO.inspect(structure_info, label: "🧠 Parsed Structure")
+
+          {:unknown, reason} ->
+            IO.puts("🤔 Couldn’t recognize structure: #{inspect(reason[:tokens])}")
+        end
+
+        # STEP 3: Continue brain training with raw words
+        words = Enum.map(tagged, fn {w, _tag} -> w end)
         BrainTrainer.teach_chain(words)
 
-        # Fire the first word in the sentence
+        # STEP 4: Fire first word
         first_word = hd(words)
         BrainCell.fire(first_word, 1.0)
 
-        # Allow some time for propagation
+        # STEP 5: Wait and respond
         Process.sleep(300)
 
-        # Get the top-activated cell and generate a phrase from it
         case BrainOutput.top_fired_cell_id() do
           nil ->
             IO.puts("🤖 ...hmm, I’ve got nothing.")
 
           top_word ->
-            response =
-              PhraseGenerator.generate_phrase(top_word)
-
+            response = PhraseGenerator.generate_phrase(top_word)
             IO.puts("🤖 #{response}")
             BrainOutput.reset_activations()
         end
