@@ -1,46 +1,52 @@
 defmodule Brain do
   use GenServer
 
-  @table :brain
+  @table Brain
 
   # ────────────────────────
   # 🧠 Public API
   # ────────────────────────
 
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, :ok, opts)
+    GenServer.start_link(__MODULE__, :ok, Keyword.put_new(opts, :name, Brain))
   end
 
-  def get(pid_or_name, id), do: GenServer.call(pid_or_name, {:get, id})
+  def get(id), do: GenServer.call(Brain, {:get, id})
 
-  def put(pid_or_name, %BrainCell{} = cell), do: GenServer.call(pid_or_name, {:put, cell})
+  def put(%BrainCell{} = cell), do: GenServer.call(Brain, {:put, cell})
 
-  def all_ids(pid_or_name), do: GenServer.call(pid_or_name, :all_ids)
+  def all_ids, do: GenServer.call(Brain, :all_ids)
 
-  def connect(pid_or_name, from_id, to_id, weight \\ 1.0, delay_ms \\ 100) do
-    GenServer.call(pid_or_name, {:connect, from_id, to_id, weight, delay_ms})
+  def clear, do: GenServer.call(Brain, :clear)
+
+  def close, do: GenServer.call(Brain, :close)
+
+  def connect(from_id, to_id, weight \\ 1.0, delay_ms \\ 100) do
+    GenServer.call(Brain, {:connect, from_id, to_id, weight, delay_ms})
   end
 
-  def update_connections(pid_or_name, id, new_conns) when is_list(new_conns) do
-    GenServer.call(pid_or_name, {:update_connections, id, new_conns})
+  def update_connections(id, new_conns) when is_list(new_conns) do
+    GenServer.call(Brain, {:update_connections, id, new_conns})
   end
 
-  def clear(pid_or_name), do: GenServer.call(pid_or_name, :clear)
-
-  def close(pid_or_name), do: GenServer.call(pid_or_name, :close)
+  def put_many(cells) when is_list(cells) do
+    Enum.each(cells, fn cell -> put(cell) end)
+  end
 
   # ────────────────────────
-  # 🧠 Server Callbacks
+  # 🧠 GenServer Callbacks
   # ────────────────────────
 
   def init(:ok) do
     case :dets.open_file(@table, type: :set) do
-      {:ok, table} ->
-        {:ok, %{table: table}}
-
-      {:error, reason} ->
-        {:stop, reason}
+      {:ok, table} -> {:ok, %{table: table}}
+      {:error, reason} -> {:stop, reason}
     end
+  end
+
+  def terminate(_reason, _state) do
+    :dets.close(@table)
+    :ok
   end
 
   def handle_call({:get, id}, _from, state) do
@@ -59,7 +65,7 @@ defmodule Brain do
   end
 
   def handle_call(:all_ids, _from, state) do
-    keys = :dets.match_object(@table, {:"$1", :_}) |> Enum.map(fn {k, _v} -> k end)
+    keys = :dets.match_object(@table, {:"$1", :_}) |> Enum.map(fn {k, _} -> k end)
     {:reply, keys, state}
   end
 
@@ -77,8 +83,8 @@ defmodule Brain do
     updated =
       case :dets.lookup(@table, from_id) do
         [{^from_id, %BrainCell{} = cell}] ->
-          new_conn = %{target_id: to_id, weight: weight, delay_ms: delay_ms}
-          updated_cell = %{cell | connections: [new_conn | cell.connections]}
+          conn = %{target_id: to_id, weight: weight, delay_ms: delay_ms}
+          updated_cell = %{cell | connections: [conn | cell.connections]}
           :dets.insert(@table, {from_id, updated_cell})
           {:ok, updated_cell}
 
@@ -104,8 +110,74 @@ defmodule Brain do
     {:reply, updated, state}
   end
 
-  def terminate(_reason, _state) do
-    :dets.close(@table)
-    :ok
+  # ────────────────────────
+  # 🧠 Word Enrichment + Cell Activation
+  # ────────────────────────
+
+  def ensure_cells_running(word) do
+    existing = get(word)
+
+    cells =
+      if existing == nil do
+        case LexiconEnricher.enrich(word) do
+          {:ok, enriched_cells} ->
+            put_many(enriched_cells)
+            enriched_cells
+
+          {:error, reason} ->
+            IO.puts("❌ Enrichment failed for #{word}: #{inspect(reason)}")
+            {:error, reason}
+        end
+      else
+        [existing]
+      end
+
+    case cells do
+      {:error, _} = err ->
+        err
+
+      _ ->
+        pids =
+          Enum.map(cells, fn cell ->
+            case ElixirAiCore.Supervisor.ensure_started(cell) do
+              {:ok, pid} ->
+                pid
+
+              {:error, reason} ->
+                IO.puts("❌ Could not start #{cell.id}: #{inspect(reason)}")
+                nil
+            end
+          end)
+
+        {:ok, Enum.filter(pids, & &1)}
+    end
+  end
+
+  # ────────────────────────
+  # 🧠 Optional: WordNet JSON Loader
+  # ────────────────────────
+
+  def store_word(%{"word" => word, "meanings" => meanings}) do
+    Enum.each(meanings, fn meaning ->
+      pos = meaning["partOfSpeech"]
+
+      Enum.with_index(meaning["definitions"], fn defn, index ->
+        id = "#{word}.#{pos}.#{index + 1}"
+
+        cell = %BrainCell{
+          id: id,
+          type: String.to_atom(pos),
+          activation: 0.0,
+          connections: [],
+          position: {0, 0, 0},
+          serotonin: 1.0,
+          dopamine: 1.0,
+          last_dose_at: nil,
+          last_substance: nil
+        }
+
+        put(cell)
+      end)
+    end)
   end
 end

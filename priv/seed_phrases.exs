@@ -1,63 +1,81 @@
-# priv/seed_phrases.exs
+# Open the DETS table
+:dets.open_file(:lemma_index, file: ~c"priv/wordnet_lemma_index.dets")
+# Delete the existing "how" entry if any
+:dets.delete(:lemma_index, "how")
 
-alias Brain
-alias BrainCell
+# Now insert the fresh "how" entry without binary encoding
+entry = {
+  "how",
+  [
+    %{
+      lemma: "how",
+      synsets: [
+        %{
+          id: "r000001",
+          pos: "r",
+          gloss: "To what degree.",
+          examples: ["How often do you practice?"],
+          relations: %{}
+        },
+        %{
+          id: "r000002",
+          pos: "r",
+          gloss: "In what manner.",
+          examples: ["How do you solve this puzzle?"],
+          relations: %{}
+        },
+        %{
+          id: "r000003",
+          pos: "r",
+          gloss: "In what state.",
+          examples: ["How are you?"],
+          relations: %{}
+        },
+        %{
+          id: "r000004",
+          pos: "r",
+          gloss:
+            "Used as a modifier to indicate surprise, delight, or other strong feelings in an exclamation.",
+          examples: ["How very interesting!"],
+          relations: %{}
+        }
+      ]
+    },
+    %{
+      lemma: "how",
+      synsets: [
+        %{
+          id: "c000001",
+          pos: "c",
+          gloss: "The manner or way that.",
+          examples: ["I remember how I solved this puzzle."],
+          relations: %{}
+        },
+        %{
+          id: "c000002",
+          pos: "c",
+          gloss: "That, the fact that, the way that.",
+          examples: [],
+          relations: %{}
+        }
+      ]
+    },
+    %{
+      lemma: "how",
+      synsets: [
+        %{
+          id: "i000001",
+          pos: "i",
+          gloss: "A greeting, used in representations of Native American speech.",
+          examples: ["How!"],
+          relations: %{}
+        }
+      ]
+    }
+  ]
+}
 
-defmodule Seeder do
-    def put_cell(word) do
-          case Brain.get(Brain, word) do
-                  nil ->
-                      cell = %BrainCell{
-                                  id: word,
-                                  connections: [],
-                                  activation: 0.0,
-                                  type: :word,
-                                  position: {0, 0},
-                                  serotonin: 0.5,
-                                  dopamine: 0.5,
-                                  last_dose_at: nil,
-                                  last_substance: nil
-                                }
-
-                      Brain.put(Brain, cell)
-                      cell
-
-                    cell ->
-                      cell
-                  end
-        end
-
-    def connect_cells(from_word, to_word) do
-          Brain.connect(Brain, from_word, to_word, 1.0, 100)
-        end
-
-    def seed_phrases!(phrases) do
-          Brain.clear(Brain)
-
-          phrases
-          |> Enum.map(&String.trim/1)
-          |> Enum.reject(&(&1 == ""))
-          |> Enum.uniq()
-          |> Enum.each(fn phrase ->
-                  words = String.split(phrase)
-                  Enum.reduce(words, nil, fn word, prev ->
-                            put_cell(word)
-                            if prev, do: connect_cells(prev, word)
-                            word
-                          end)
-                end)
-
-          IO.puts("✅ Seeded #{length(phrases)} phrases from file")
-        end
-end
-
-# 📄 Load phrases from "all_phrases.txt"
-file_path = "./priv/all_phrases.txt"
-
-phrases =
-    file_path
-  |> File.read!()
-  |> String.split("\n")
-
-Seeder.seed_phrases!(phrases)
+:dets.insert(:lemma_index, entry)
+:dets.sync(:lemma_index)
+:dets.close(:lemma_index)
 

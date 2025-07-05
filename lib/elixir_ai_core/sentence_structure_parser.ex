@@ -1,4 +1,4 @@
-defmodule ElixirAiCore.SentenceStructureParser do
+defmodule SentenceStructureParser do
   @moduledoc """
   Parses tagged sentences into grammar structure like SVO, VO, etc.
   """
@@ -46,9 +46,8 @@ defmodule ElixirAiCore.SentenceStructureParser do
       pos == [:interjection, :adverb] ->
         {:ok, %{structure: :greeting, tokens: tagged_words}}
 
-        pos == [:determiner, :verb, :adjective] ->
-          {:ok, %{structure: :statement, tokens: tagged_words}}
-
+      pos == [:determiner, :verb, :adjective] ->
+        {:ok, %{structure: :statement, tokens: tagged_words}}
 
       true ->
         {:unknown, %{tokens: tagged_words, reason: "Structure not matched"}}

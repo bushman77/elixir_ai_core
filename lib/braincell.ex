@@ -5,17 +5,23 @@ defmodule BrainCell do
   alias Brain
   alias ElixirAiCore.Core
 
-  @type id :: atom()
-  @type position :: {float(), float(), float()}
-  @type connection :: %{target_id: id(), distance: float(), weight: float(), delay_ms: integer()}
-  @type substance ::
-          :alcohol | :caffeine | :nicotine | :cannabis | :cocaine | :meth | :crack | :sugar
   @default_suppression_threshold 0.4
   @default_overstim_threshold 1.6
 
+  @type id :: String.t()
+  @type position :: {float(), float(), float()}
+  @type connection :: %{target_id: id(), weight: float(), delay_ms: non_neg_integer()}
+  @type substance :: :serotonin | :dopamine | :acetylcholine | :norepinephrine | atom()
+
   @type t :: %__MODULE__{
           id: id(),
+          word: String.t(),
           type: atom(),
+          pos: atom(),
+          definition: String.t(),
+          example: String.t() | nil,
+          synonyms: [String.t()],
+          antonyms: [String.t()],
           connections: [connection()],
           status: :active | :inactive | :suppressed | :overstimulated,
           activation: float(),
@@ -28,15 +34,21 @@ defmodule BrainCell do
 
   defstruct [
     :id,
+    :word,
     :type,
+    :pos,
+    :definition,
+    :example,
+    :synonyms,
+    :antonyms,
+    :activation,
+    :serotonin,
+    :dopamine,
+    :connections,
+    :position,
     :status,
     :last_dose_at,
-    :last_substance,
-    connections: [],
-    activation: 0.0,
-    position: {0.0, 0.0, 0.0},
-    serotonin: 1.0,
-    dopamine: 1.0
+    :last_substance
   ]
 
   # Public API

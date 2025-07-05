@@ -1,9 +1,28 @@
-defmodule ElixirAiCore.Tokenizer do
+defmodule Tokenizer do
   @moduledoc """
-  Pure Elixir tokenizer and embedding generator.
+  Tokenizes text into words and resolves part-of-speech (POS) tags
+  using a built-in fallback dictionary.
   """
 
   @base 128
+
+  # Local fallback POS data for words
+  @pos_data %{
+    "how" => [:adverb, :conjunction],
+    "are" => [:verb],
+    "you" => [:pronoun],
+    "what" => [:wh_determiner, :pronoun],
+    "is" => [:verb],
+    "your" => [:possessive],
+    "name" => [:noun],
+    "can" => [:aux, :modal],
+    "i" => [:pronoun],
+    "help" => [:verb, :noun],
+    "do" => [:verb, :aux],
+    "think" => [:verb],
+    "he" => [:pronoun],
+    "go" => [:base_verb, :verb]
+  }
 
   @doc """
   Convert a word to a unique numeric ID based on char positions.
@@ -25,5 +44,22 @@ defmodule ElixirAiCore.Tokenizer do
   """
   def embed(word, max \\ 1_000_000_000.0) do
     word_to_id(word) / max
+  end
+
+  @doc """
+  Tokenizes a sentence into a list of maps with word and possible POS tags.
+  """
+  @spec tokenize(String.t()) :: [%{word: String.t(), pos: [atom()]}]
+  def tokenize(text) when is_binary(text) do
+    text
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9\s]/, "")
+    |> String.split()
+    |> Enum.map(fn word ->
+      %{
+        word: word,
+        pos: Map.get(@pos_data, word, [:unknown])
+      }
+    end)
   end
 end

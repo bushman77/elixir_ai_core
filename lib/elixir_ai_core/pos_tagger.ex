@@ -1,87 +1,49 @@
-defmodule ElixirAiCore.POSTagger do
+defmodule POSTagger do
   @moduledoc """
-  Basic Part-of-Speech tagger with grammar-first dictionary, suffix heuristics,
-  and runtime learning of unknown word tags.
+  Dynamic Part-of-Speech tagger using WordNet DETS with suffix fallback.
   """
 
-  # ✅ Adds child_spec/1 for supervision
-  use Agent
-
-  @initial_function_words %{
-    "this" => :determiner,
-    "that" => :determiner,
-    "a" => :determiner,
-    "the" => :determiner,
-    "no" => :interjection,
-    "well" => :interjection,
-    "not" => :adverb,
-    "about" => :preposition,
-    "how" => :adverb,
-    "what" => :pronoun,
-    "i" => :pronoun,
-    "you" => :pronoun,
-    "we" => :pronoun,
-    "they" => :pronoun,
+  @fallback_pos_exceptions %{
+    "be" => :verb,
     "is" => :verb,
     "are" => :verb,
-    "am" => :verb,
     "was" => :verb,
-    "were" => :verb,
-    "do" => :verb,
-    "does" => :verb,
-    "want" => :verb,
-    "see" => :verb,
-    "testing" => :verb,
-    "suppose" => :verb,
-    "start" => :noun,
-    "console" => :noun,
-    "it" => :pronoun,
-    "its" => :pronoun,
-    "hows" => :verb,
-    "great" => :adjective,
-    "so" => :adverb,
-    "far" => :adverb,
-    "heck" => :noun,
-    "parrot" => :noun,
-    "be" => :verb,
-    "fine" => :adjective,
-    "way" => :noun,
-    "hello" => :interjection,
-    "there" => :adverb,
-    "pleasure" => :noun,
-    "to" => :preposition,
-    "meet" => :verb,
-    "interesting" => :adjective
+    "were" => :verb
   }
 
-  # Agent to track learned word types during runtime
-  def start_link(_), do: Agent.start_link(fn -> @initial_function_words end, name: __MODULE__)
+  def tag_word(word) do
+    case Core.lookup_input(word) do
+      %{} = result ->
+        case result[word] do
+          [%{synsets: [%{pos: pos} | _]} | _] ->
+            pos_code_to_tag(pos)
 
-  def tag(word) do
-    Agent.get_and_update(__MODULE__, fn dict ->
-      case Map.get(dict, word) do
-        nil ->
-          tag = suffix_tag(word)
-          {tag, Map.put(dict, word, tag)}
+          _ ->
+            fallback_tag(word)
+        end
 
-        existing ->
-          {existing, dict}
-      end
-    end)
+      _ ->
+        fallback_tag(word)
+    end
   end
 
-  def suffix_tag(word) do
-    if Map.has_key?(@exceptions, word) do
-      @exceptions[word]
-    else
-      cond do
-        String.ends_with?(word, "ing") -> :verb
-        String.ends_with?(word, "ed") -> :verb
-        String.ends_with?(word, "ly") -> :adverb
-        String.ends_with?(word, "ion") -> :noun
-        String.ends_with?(word, "ness") -> :noun
-        true -> :unknown
-      end
+  defp pos_code_to_tag("n"), do: :noun
+  defp pos_code_to_tag("v"), do: :verb
+  defp pos_code_to_tag("a"), do: :adjective
+  defp pos_code_to_tag("r"), do: :adverb
+  defp pos_code_to_tag("c"), do: :conjunction
+  defp pos_code_to_tag("i"), do: :interjection
+  defp pos_code_to_tag(_), do: :unknown
+
+  defp fallback_tag(word) do
+    cond do
+      Map.has_key?(@fallback_pos_exceptions, word) -> @fallback_pos_exceptions[word]
+      String.ends_with?(word, "ing") -> :verb
+      String.ends_with?(word, "ed") -> :verb
+      String.ends_with?(word, "ly") -> :adverb
+      String.ends_with?(word, "ion") -> :noun
+      String.ends_with?(word, "ness") -> :noun
+      true -> :unknown
     end
   end
 
@@ -90,6 +52,6 @@ defmodule ElixirAiCore.POSTagger do
     |> String.downcase()
     |> String.replace(~r/[^\w\s]/, "")
     |> String.split()
-    |> Enum.map(fn word -> {word, tag(word)} end)
+    |> Enum.map(fn word -> {word, tag_word(word)} end)
   end
 end

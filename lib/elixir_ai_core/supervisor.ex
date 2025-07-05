@@ -9,14 +9,25 @@ defmodule ElixirAiCore.Supervisor do
     DynamicSupervisor.init(strategy: :one_for_one)
   end
 
-  def start_braincell(id, type \\ :generic) do
-    spec = %{
-      id: BrainCell,
-      start: {BrainCell, :start_link, [%{id: id, type: type}]},
-      restart: :transient,
-      type: :worker
-    }
+  @doc """
+  Ensures a BrainCell with the given ID is running.
+  If already running, returns {:ok, pid}.
+  Otherwise, starts a new one and returns {:ok, pid}.
+  """
+  def ensure_started(%{id: id, type: type} = args) do
+    case Registry.lookup(BrainCellRegistry, id) do
+      [{pid, _}] ->
+        {:ok, pid}
 
-    DynamicSupervisor.start_child(__MODULE__, spec)
+      [] ->
+        spec = %{
+          id: BrainCell,
+          start: {BrainCell, :start_link, [args]},
+          restart: :transient,
+          type: :worker
+        }
+
+        DynamicSupervisor.start_child(__MODULE__, spec)
+    end
   end
 end

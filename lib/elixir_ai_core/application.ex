@@ -3,7 +3,6 @@ defmodule ElixirAiCore.Application do
 
   def start(_type, _args) do
     children = [
-      ElixirAiCore.POSTagger,
       {Registry, keys: :unique, name: BrainCell.Registry},
       ElixirAiCore.Supervisor,
       {Brain, name: Brain}
@@ -12,11 +11,11 @@ defmodule ElixirAiCore.Application do
     opts = [strategy: :one_for_one, name: ElixirAiCore.TopSupervisor]
     {:ok, pid} = Supervisor.start_link(children, opts)
 
-    # 🧠 Launch ConsoleInterface in a separate task after boot
+    # 🧠 Launch Console in a separate task after boot
     Task.start(fn ->
       # Optional: wait for the system to boot up fully
       Process.sleep(500)
-      ElixirAiCore.ConsoleInterface.start()
+      Console.start()
     end)
 
     {:ok, pid}

@@ -25,13 +25,16 @@ defmodule ElixirAiCore.MixProject do
   defp deps do
     [
       {:nx, "~> 0.5.1"},
-      {:axon, "~> 0.5.1"}
+      {:axon, "~> 0.5.1"},
+      {:jason, "~> 1.4"},
+      {:tesla, "~> 1.4"},
+      {:hackney, "~> 1.18"}
     ]
   end
 
   defp aliases do
     [
-      seed: ["run priv/seed_phrases.exs"]
+      seed: ["run priv/seed.exs"]
     ]
   end
 end
