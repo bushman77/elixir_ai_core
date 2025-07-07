@@ -12,7 +12,7 @@ defmodule PhraseGenerator do
   defp do_generate(_word, 0, acc), do: Enum.reverse(acc)
 
   defp do_generate(word, length, acc) do
-    case Brain.get(Brain, word) do
+    case Brain.get(word) do
       nil ->
         Enum.reverse(acc)
 

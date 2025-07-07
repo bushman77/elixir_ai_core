@@ -1,183 +1,105 @@
 defmodule Brain do
   use GenServer
 
-  @table Brain
+  alias Core.DB
+  alias Core.Registry, as: BrainRegistry
+  alias LexiconEnricher
+  alias BrainCell
 
   # ────────────────────────
-  # 🧠 Public API
+  # Public API
   # ────────────────────────
 
-  def start_link(opts) do
-    GenServer.start_link(__MODULE__, :ok, Keyword.put_new(opts, :name, Brain))
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, [], Keyword.put_new(opts, :name, __MODULE__))
   end
 
-  def get(id), do: GenServer.call(Brain, {:get, id})
-
-  def put(%BrainCell{} = cell), do: GenServer.call(Brain, {:put, cell})
-
-  def all_ids, do: GenServer.call(Brain, :all_ids)
-
-  def clear, do: GenServer.call(Brain, :clear)
-
-  def close, do: GenServer.call(Brain, :close)
-
-  def connect(from_id, to_id, weight \\ 1.0, delay_ms \\ 100) do
-    GenServer.call(Brain, {:connect, from_id, to_id, weight, delay_ms})
-  end
-
-  def update_connections(id, new_conns) when is_list(new_conns) do
-    GenServer.call(Brain, {:update_connections, id, new_conns})
-  end
-
-  def put_many(cells) when is_list(cells) do
-    Enum.each(cells, fn cell -> put(cell) end)
-  end
+  @doc """
+  Retrieves all brain cells associated with the given word.
+  Follows 3-tier lookup: Registry -> DETS -> LexiconEnricher.
+  """
+  def get(word), do: GenServer.call(__MODULE__, {:get, word})
 
   # ────────────────────────
-  # 🧠 GenServer Callbacks
+  # GenServer Callbacks
   # ────────────────────────
 
-  def init(:ok) do
-    case :dets.open_file(@table, type: :set) do
-      {:ok, table} -> {:ok, %{table: table}}
-      {:error, reason} -> {:stop, reason}
-    end
+  @impl true
+  def init(_opts) do
+    {:ok, []}
   end
 
-  def terminate(_reason, _state) do
-    :dets.close(@table)
-    :ok
-  end
+  @impl true
+def handle_call({:get, word}, _from, state) do
+  case BrainRegistry.query(word) do
+    [] ->
+      case DB.select(word) do
+        [] ->
+          case LexiconEnricher.enrich(word) do
+            {:ok, []} ->
+              {:reply, {:error, :no_definitions_found}, state}
 
-  def handle_call({:get, id}, _from, state) do
-    result =
-      case :dets.lookup(@table, id) do
-        [{^id, cell}] -> cell
-        _ -> nil
+            {:ok, enriched_cells} ->
+              :ok = DB.insert_many(enriched_cells)
+
+              statuses =
+                enriched_cells
+                |> Enum.map(fn cell ->
+                  with {:ok, pid} <- BrainRegistry.register(cell) do
+                    # Use a safe call to get status (implement safe_status/1)
+                    safe_status(pid)
+                  else
+                    err -> IO.inspect(err, label: "Register failed")
+                  end
+                end)
+
+              {:reply, statuses, state}
+
+            {:error, reason} ->
+              {:reply, {:error, {:enrich_failed, reason}}, state}
+          end
+
+        persisted when is_list(persisted) ->
+
+          statuses =
+            persisted
+            |> Enum.map(fn {_id, _word, cell} ->
+              with {:ok, pid} <- BrainRegistry.register(cell) do
+                safe_status(pid)
+              else
+                err -> IO.inspect(err, label: "Register failed")
+              end
+            end)
+
+          {:reply, statuses, state}
       end
 
-    {:reply, result, state}
-  end
+    active when is_list(active) ->
 
-  def handle_call({:put, %BrainCell{id: id} = cell}, _from, state) do
-    :ok = :dets.insert(@table, {id, cell})
-    {:reply, :ok, state}
-  end
+      statuses =
+        Enum.map(active, fn {_id, pid, _cell} ->
 
-  def handle_call(:all_ids, _from, state) do
-    keys = :dets.match_object(@table, {:"$1", :_}) |> Enum.map(fn {k, _} -> k end)
-    {:reply, keys, state}
-  end
+          case safe_status(pid) do
+            {:ok, status} -> status
+            {:error, reason} -> {:error, reason}
+          end
+        end)
 
-  def handle_call(:clear, _from, state) do
-    :ok = :dets.delete_all_objects(@table)
-    {:reply, :ok, state}
-  end
-
-  def handle_call(:close, _from, state) do
-    :ok = :dets.close(@table)
-    {:reply, :ok, state}
-  end
-
-  def handle_call({:connect, from_id, to_id, weight, delay_ms}, _from, state) do
-    updated =
-      case :dets.lookup(@table, from_id) do
-        [{^from_id, %BrainCell{} = cell}] ->
-          conn = %{target_id: to_id, weight: weight, delay_ms: delay_ms}
-          updated_cell = %{cell | connections: [conn | cell.connections]}
-          :dets.insert(@table, {from_id, updated_cell})
-          {:ok, updated_cell}
-
-        _ ->
-          {:error, :not_found}
-      end
-
-    {:reply, updated, state}
-  end
-
-  def handle_call({:update_connections, id, new_conns}, _from, state) do
-    updated =
-      case :dets.lookup(@table, id) do
-        [{^id, %BrainCell{} = cell}] ->
-          updated_cell = %{cell | connections: new_conns}
-          :dets.insert(@table, {id, updated_cell})
-          {:ok, updated_cell}
-
-        _ ->
-          {:error, :not_found}
-      end
-
-    {:reply, updated, state}
-  end
-
-  # ────────────────────────
-  # 🧠 Word Enrichment + Cell Activation
-  # ────────────────────────
-
-  def ensure_cells_running(word) do
-    existing = get(word)
-
-    cells =
-      if existing == nil do
-        case LexiconEnricher.enrich(word) do
-          {:ok, enriched_cells} ->
-            put_many(enriched_cells)
-            enriched_cells
-
-          {:error, reason} ->
-            IO.puts("❌ Enrichment failed for #{word}: #{inspect(reason)}")
-            {:error, reason}
-        end
-      else
-        [existing]
-      end
-
-    case cells do
-      {:error, _} = err ->
-        err
-
-      _ ->
-        pids =
-          Enum.map(cells, fn cell ->
-            case ElixirAiCore.Supervisor.ensure_started(cell) do
-              {:ok, pid} ->
-                pid
-
-              {:error, reason} ->
-                IO.puts("❌ Could not start #{cell.id}: #{inspect(reason)}")
-                nil
-            end
-          end)
-
-        {:ok, Enum.filter(pids, & &1)}
-    end
-  end
-
-  # ────────────────────────
-  # 🧠 Optional: WordNet JSON Loader
-  # ────────────────────────
-
-  def store_word(%{"word" => word, "meanings" => meanings}) do
-    Enum.each(meanings, fn meaning ->
-      pos = meaning["partOfSpeech"]
-
-      Enum.with_index(meaning["definitions"], fn defn, index ->
-        id = "#{word}.#{pos}.#{index + 1}"
-
-        cell = %BrainCell{
-          id: id,
-          type: String.to_atom(pos),
-          activation: 0.0,
-          connections: [],
-          position: {0, 0, 0},
-          serotonin: 1.0,
-          dopamine: 1.0,
-          last_dose_at: nil,
-          last_substance: nil
-        }
-
-        put(cell)
-      end)
-    end)
+      {:reply, statuses, state}
   end
 end
+defp safe_status(pid) do
+  if Process.alive?(pid) do
+    try do
+      {:ok, GenServer.call(pid, :status, 5_000)}
+    catch
+      :exit, {:timeout, _} -> {:error, :timeout}
+      :exit, reason -> {:error, reason}
+    end
+  else
+    {:error, :dead_pid}
+  end
+end
+
+end
+

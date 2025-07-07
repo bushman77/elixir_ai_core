@@ -50,7 +50,7 @@ defmodule BrainSim do
       Enum.reduce(connections, {visited, trail}, fn conn, {v, t} ->
         Process.sleep(conn.delay_ms)
 
-        case Brain.get(Brain, conn.target_id) do
+        case Brain.get(conn.target_id) do
           %BrainCell{} = target_cell ->
             do_fire(target_cell, strength * conn.weight, depth + 1, v, t)
 

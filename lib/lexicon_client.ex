@@ -1,5 +1,6 @@
 defmodule LexiconClient do
   use Tesla
+plug Tesla.Middleware.Timeout, timeout: 5_000  # 5 seconds
 
   plug(Tesla.Middleware.BaseUrl, "https://api.dictionaryapi.dev/api/v2")
   plug(Tesla.Middleware.JSON)

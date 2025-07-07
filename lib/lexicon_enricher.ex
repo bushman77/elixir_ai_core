@@ -1,18 +1,43 @@
 defmodule LexiconEnricher do
   alias LexiconClient
+  alias BrainCell
 
   @doc """
-  Fetches word definitions from the online dictionary API,
-  parses them, and inserts them into the DETS lexicon table.
+  Fetches a word from the online dictionary and returns a list of BrainCell structs,
+  one per meaning + POS.
   """
-  def enrich(word) do
+  def enrich(word) when is_binary(word) do
     case LexiconClient.fetch_word(word) do
-      {:ok, %{status: 200, body: [entry | _]}} ->
-        synsets = parse_meanings(entry["meanings"])
-        # synsets
-        # |> List.first
-        entry
-        |> IO.inspect()
+      {:ok, %{status: 200, body: [%{"word" => w, "meanings" => meanings} | _]}} ->
+        cells =
+          meanings
+          |> Enum.flat_map(fn %{"partOfSpeech" => pos_str, "definitions" => defs} ->
+            pos = normalize_pos(pos_str)
+
+            Enum.with_index(defs, 1)
+            |> Enum.map(fn {defn, idx} ->
+              %BrainCell{
+                id: "#{w}|#{pos}|#{idx}",
+                word: w,
+                pos: pos,
+                definition: defn["definition"] || "",
+                example: defn["example"] || "",
+                synonyms: defn["synonyms"] || [],
+                antonyms: defn["antonyms"] || [],
+                type: nil,
+                activation: 0.0,
+                serotonin: 1.0,
+                dopamine: 1.0,
+                connections: [],
+                position: {0.0, 0.0, 0.0},
+                status: :active,
+                last_dose_at: nil,
+                last_substance: nil
+              }
+            end)
+          end)
+
+        {:ok, cells}
 
       {:ok, %{status: 404}} ->
         {:error, :not_found}
@@ -22,37 +47,13 @@ defmodule LexiconEnricher do
     end
   end
 
-  defp parse_meanings(meanings) do
-    Enum.map(meanings, fn %{"partOfSpeech" => pos, "definitions" => defs} ->
-      lemma = "#{abbreviate(pos)}.#{pos}"
-
-      %{
-        lemma: lemma,
-        synsets:
-          Enum.with_index(defs)
-          |> Enum.map(fn {defn, i} ->
-            gloss = defn["definition"]
-            ex = Map.get(defn, "example", nil)
-
-            %{
-              id: "#{abbreviate(pos)}#{pad_index(i)}",
-              pos: abbreviate(pos),
-              gloss: gloss,
-              examples: if(ex, do: [ex], else: []),
-              relations: %{}
-            }
-          end)
-      }
-    end)
-  end
-
-  defp abbreviate("noun"), do: "n"
-  defp abbreviate("verb"), do: "v"
-  defp abbreviate("adjective"), do: "a"
-  defp abbreviate("adverb"), do: "r"
-  defp abbreviate("conjunction"), do: "c"
-  defp abbreviate("interjection"), do: "i"
-  defp abbreviate(_), do: "u"
-
-  defp pad_index(i), do: String.pad_leading(Integer.to_string(i + 1), 6, "0")
+  defp normalize_pos("noun"), do: :noun
+  defp normalize_pos("verb"), do: :verb
+  defp normalize_pos("adjective"), do: :adjective
+  defp normalize_pos("adverb"), do: :adverb
+  defp normalize_pos("interjection"), do: :interjection
+  defp normalize_pos("conjunction"), do: :conjunction
+  defp normalize_pos("preposition"), do: :preposition
+  defp normalize_pos(_), do: :unknown
 end
+

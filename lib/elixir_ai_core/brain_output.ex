@@ -13,7 +13,7 @@ defmodule BrainOutput do
         id -> id
       end
 
-    case Brain.get(Brain, start_id) do
+    case Brain.get(start_id) do
       nil -> "🤖 (no thoughts yet...)"
       cell -> walk_chain(cell)
     end
@@ -24,7 +24,7 @@ defmodule BrainOutput do
   defp walk_chain(%{id: id, connections: nil}), do: id
 
   defp walk_chain(%{id: id, connections: [next | _]}) do
-    case Brain.get(Brain, next.target_id) do
+    case Brain.get(next.target_id) do
       nil -> id
       next_cell -> id <> " " <> walk_chain(next_cell)
     end
@@ -32,7 +32,7 @@ defmodule BrainOutput do
 
   def top_fired_cell_id do
     Brain.all_ids(Brain)
-    |> Enum.map(&Brain.get(Brain, &1))
+    |> Enum.map(&Brain.get( &1))
     |> Enum.filter(& &1)
     |> Enum.sort_by(& &1.activation, :desc)
     |> List.first()
@@ -47,7 +47,7 @@ defmodule BrainOutput do
     |> Enum.each(fn id ->
       case Brain.get(Brain, id) do
         %BrainCell{} = cell ->
-          Brain.put(Brain, %{cell | activation: 0.0})
+          Brain.put(%{cell | activation: 0.0})
 
         _ ->
           :ok

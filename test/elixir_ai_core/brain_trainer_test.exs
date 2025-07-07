@@ -11,7 +11,6 @@ defmodule ElixirAiCore.BrainTrainerTest do
   setup do
     Registry.start_link(keys: :unique, name: BrainCell.Registry)
     # Ensure clean DETS table
-    Brain.clear(Brain)
     :ok
   end
 

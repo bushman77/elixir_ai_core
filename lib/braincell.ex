@@ -3,7 +3,7 @@ defmodule BrainCell do
   require Logger
   alias __MODULE__
   alias Brain
-  alias ElixirAiCore.Core
+  alias Core
 
   @default_suppression_threshold 0.4
   @default_overstim_threshold 1.6
@@ -67,44 +67,48 @@ defmodule BrainCell do
   # Server Callbacks
   def init(%{id: id}), do: init(id)
 
-  def init(id) do
-    state =
-      Brain.get(Brain, id) ||
-        %BrainCell{
-          id: id,
-          position: {0.0, 0.0, 0.0},
-          activation: 0.0,
-          connections: []
-        }
+def init(id) do
 
-    {:ok, state}
-  end
+  state =
+      %BrainCell{
+        id: id,
+        position: {0.0, 0.0, 0.0},
+        activation: 0.0,
+        connections: []
+      }
+
+
+  {:ok, state}
+end
 
   def handle_cast({:update_connections, new_connections}, state) do
     updated = %{state | connections: new_connections}
-    Brain.put(Brain, updated)
+    Brain.put(updated)
     {:noreply, updated}
   end
+
+def handle_info({:register_self, registry, id, _cell}, state) do
+  Registry.register(registry, id, state)
+  {:noreply, state}
+end
+
 
   def handle_call(:get_state, _from, state), do: {:reply, state, state}
 
   def handle_cast({:fire, strength}, state) do
-    Logger.debug("Firing cell #{state.id} with strength #{Float.round(strength, 3)}")
-
-    Brain.put(Brain, state)
-
+    Brain.put(state)
     Enum.each(state.connections || [], fn conn ->
       new_strength = strength * conn.weight
-
-      Logger.debug(
-        " → Sending to #{conn.target_id} (delay #{conn.delay_ms}ms, weight #{Float.round(conn.weight, 3)})"
-      )
-
       BrainCell.fire(conn.target_id, new_strength)
     end)
 
     {:noreply, %{state | activation: state.activation + strength}}
   end
+
+def handle_call(:status, _from, state) do
+  {:reply, {:ok, state}, state}
+end
+
 
   @doc "Applies serotonin/dopamine changes, optionally tracking substance and time"
   def apply_chemical_change(

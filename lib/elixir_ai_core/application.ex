@@ -4,20 +4,15 @@ defmodule ElixirAiCore.Application do
   def start(_type, _args) do
     children = [
       {Registry, keys: :unique, name: BrainCell.Registry},
+      {DynamicSupervisor, strategy: :one_for_one, name: BrainCellSupervisor},
       ElixirAiCore.Supervisor,
-      {Brain, name: Brain}
+      {Brain, name: Brain},
+      Console,    # your GenServer Console process
+      Core.DB
     ]
 
     opts = [strategy: :one_for_one, name: ElixirAiCore.TopSupervisor]
-    {:ok, pid} = Supervisor.start_link(children, opts)
-
-    # 🧠 Launch Console in a separate task after boot
-    Task.start(fn ->
-      # Optional: wait for the system to boot up fully
-      Process.sleep(500)
-      Console.start()
-    end)
-
-    {:ok, pid}
+    Supervisor.start_link(children, opts)
   end
 end
+

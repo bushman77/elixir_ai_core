@@ -1,54 +1,80 @@
 defmodule Console do
+  use GenServer
+
   @moduledoc """
-  Simple interactive console for AI Brain.
-  Commands:
-    - learn <word>  # fetches word info, memorizes it in the brain
-    - anything else # interprets input and shows token/POS tagging
+  Interactive console for AI Brain.
+  Type any sentence and the system will tokenize it, enrich unknown words, register brain cells, and show analysis.
   """
 
-  def start do
-    IO.puts("🧠 AI Brain Console started. Type 'learn <word>' to teach me something.")
-    loop()
+  # Public API
+  def start_link(_opts) do
+    GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
   end
 
-  defp loop do
+  # Call this to start console prompt loop asynchronously
+  def start do
+    GenServer.cast(__MODULE__, :prompt)
+  end
+
+  # GenServer callbacks
+
+def init(:ok) do
+  IO.puts("🧠 AI Brain Console started. Type anything to begin.")
+  # Kick off prompt loop immediately
+  GenServer.cast(self(), :prompt)
+  {:ok, %{}}
+end
+
+def handle_cast(:prompt, state) do
+  try do
     input = IO.gets("> ")
 
     case input do
       nil ->
         IO.puts("\nGoodbye!")
-        :ok
+        {:stop, :normal, state}
 
       _ ->
-        input = String.trim(input)
-        handle_input(input)
-        loop()
+        input
+        |> String.trim()
+        |> handle_input()
+
+        GenServer.cast(self(), :prompt)
+        {:noreply, state}
     end
+  rescue
+    exception ->
+      IO.puts("⚠️ Console error: #{Exception.message(exception)}")
+      GenServer.cast(self(), :prompt)
+      {:noreply, state}
   end
-
-  defp handle_input("learn " <> word) when byte_size(word) > 0 do
-    case LexiconEnricher.enrich(word) do
-      {:ok, lexicon_map} ->
-        case Core.memorize(lexicon_map) do
-          {:ok, ids} ->
-            IO.puts("✅ Learned #{word} with IDs: #{Enum.join(ids, ", ")}")
-
-          {:error, reason} ->
-            IO.puts("❌ Failed to memorize #{word}: #{inspect(reason)}")
-        end
-
-      {:error, reason} ->
-        IO.puts("❌ Failed to enrich #{word}: #{inspect(reason)}")
-    end
-  end
-
-  defp handle_input(input) when input != "" do
-    tokens = Tokenizer.tokenize(input)
-    {:answer, analysis} = Core.POS.classify_input(tokens)
-
-    IO.inspect(analysis, label: "🤖")
-  end
-
-  defp handle_input(""), do: :ok
 end
 
+  # Internal input handler (same as your original)
+  defp handle_input(""), do: :ok
+
+  defp handle_input(input) do
+    tokens = Tokenizer.tokenize(input)
+
+    Enum.each(tokens, fn token ->
+      if token.pos == [:unknown] do
+        case Brain.get(token.word) do
+          {:error, reason} ->
+            IO.puts("⚠️ Failed to enrich #{token.word}: #{inspect(reason)}")
+
+          [] ->
+            IO.puts("⚠️ No brain cells found for #{token.word}")
+
+          _ ->
+            :ok
+        end
+      end
+    end)
+
+    case Core.resolve_and_classify(input) do
+      {:answer, analysis} -> IO.inspect(analysis, label: "🤖")
+      {:error, :dictionary_missing} -> IO.puts("🤖: I believe I have misplaced my dictionary.")
+    end
+  end
+end
+  
