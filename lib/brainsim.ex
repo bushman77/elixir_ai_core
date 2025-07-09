@@ -38,7 +38,7 @@ defmodule BrainSim do
     end
   end
 
-  defp do_fire(%BrainCell{id: id, connections: connections}, strength, depth, visited, trail) do
+  defp do_fire(%BCell{id: id, connections: connections}, strength, depth, visited, trail) do
     if depth >= @max_depth or strength <= 0.01 or MapSet.member?(visited, id) do
       {visited, trail}
     else
@@ -51,7 +51,7 @@ defmodule BrainSim do
         Process.sleep(conn.delay_ms)
 
         case Brain.get(conn.target_id) do
-          %BrainCell{} = target_cell ->
+          %BCell{} = target_cell ->
             do_fire(target_cell, strength * conn.weight, depth + 1, v, t)
 
           _ ->

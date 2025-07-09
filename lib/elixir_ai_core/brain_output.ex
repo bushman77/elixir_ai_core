@@ -32,13 +32,13 @@ defmodule BrainOutput do
 
   def top_fired_cell_id do
     Brain.all_ids(Brain)
-    |> Enum.map(&Brain.get( &1))
+    |> Enum.map(&Brain.get(&1))
     |> Enum.filter(& &1)
     |> Enum.sort_by(& &1.activation, :desc)
     |> List.first()
     |> case do
       nil -> nil
-      %BrainCell{id: id} -> id
+      %BCell{id: id} -> id
     end
   end
 
@@ -46,7 +46,7 @@ defmodule BrainOutput do
     Brain.all_ids(Brain)
     |> Enum.each(fn id ->
       case Brain.get(Brain, id) do
-        %BrainCell{} = cell ->
+        %BCell{} = cell ->
           Brain.put(%{cell | activation: 0.0})
 
         _ ->

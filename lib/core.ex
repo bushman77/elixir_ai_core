@@ -72,7 +72,7 @@ defmodule Core do
   def to_brain_cells(definitions) when is_list(definitions) do
     Enum.with_index(definitions, 1)
     |> Enum.map(fn {entry, index} ->
-      %BrainCell{
+      %BCell{
         id: "#{entry.word}|#{entry.pos}|#{index}",
         word: entry.word,
         pos: entry.pos,
@@ -93,32 +93,32 @@ defmodule Core do
     end)
   end
 
-@spec memorize([BrainCell.t()]) :: {:ok, [String.t()]} | {:error, list()}
-def memorize(cells) when is_list(cells) do
-  results =
-    Enum.map(cells, fn %BrainCell{id: id} = cell ->
-      case Registry.lookup(BrainCell.Registry, id) do
-        [] ->
-          case BrainCell.start_link(cell) do
-            {:ok, _pid} ->
-IO.inspect cell
-              Brain.put(cell)
-              {:ok, id}
+  @spec memorize([BrainCell.t()]) :: {:ok, [String.t()]} | {:error, list()}
+  def memorize(cells) when is_list(cells) do
+    results =
+      Enum.map(cells, fn %BCell{id: id} = cell ->
+        case Registry.lookup(BrainCell.Registry, id) do
+          [] ->
+            case BrainCell.start_link(cell) do
+              {:ok, _pid} ->
+                IO.inspect(cell)
+                Brain.put(cell)
+                {:ok, id}
 
-            {:error, reason} ->
-              {:error, {id, reason}}
-          end
+              {:error, reason} ->
+                {:error, {id, reason}}
+            end
 
-        [_] ->
-          {:ok, id}
-      end
-    end)
+          [_] ->
+            {:ok, id}
+        end
+      end)
 
-  case Enum.filter(results, &match?({:error, _}, &1)) do
-    [] -> {:ok, Enum.map(results, fn {:ok, id} -> id end)}
-    errors -> {:error, errors}
+    case Enum.filter(results, &match?({:error, _}, &1)) do
+      [] -> {:ok, Enum.map(results, fn {:ok, id} -> id end)}
+      errors -> {:error, errors}
+    end
   end
-end
 
   def memorize(_), do: {:error, :invalid_format}
 
@@ -158,12 +158,14 @@ end
       end
     end
   end
+
   @doc "Clamps a float value between min and max."
   def clamp(val), do: clamp(val, 0.0, 2.0)
   @spec clamp(float(), float(), float()) :: float()
   def clamp(val, min, max) when is_float(val) and is_float(min) and is_float(max) do
     val |> max(min) |> min(max)
   end
+
   # --- Helpers ---
 
   defp normalize_pos("noun"), do: :noun
@@ -173,4 +175,3 @@ end
   defp normalize_pos("interjection"), do: :interjection
   defp normalize_pos(_), do: :unknown
 end
-

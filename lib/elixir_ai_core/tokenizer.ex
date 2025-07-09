@@ -1,28 +1,16 @@
 defmodule Tokenizer do
   @moduledoc """
   Tokenizes text into words and resolves part-of-speech (POS) tags
-  using a built-in fallback dictionary.
+  using the Brain DB and online enrichment as fallback.
   """
+  import Ecto.Query
+
+  alias BCell
+  alias Core.DB
+  alias BrainCell
+  alias LexiconEnricher
 
   @base 128
-
-  # Local fallback POS data for words
-  @pos_data %{
-    "how" => [:adverb, :conjunction],
-    "are" => [:verb],
-    "you" => [:pronoun],
-    "what" => [:wh_determiner, :pronoun],
-    "is" => [:verb],
-    "your" => [:possessive],
-    "name" => [:noun],
-    "can" => [:aux, :modal],
-    "i" => [:pronoun],
-    "help" => [:verb, :noun],
-    "do" => [:verb, :aux],
-    "think" => [:verb],
-    "he" => [:pronoun],
-    "go" => [:base_verb, :verb]
-  }
 
   @doc """
   Convert a word to a unique numeric ID based on char positions.
@@ -55,11 +43,25 @@ defmodule Tokenizer do
     |> String.downcase()
     |> String.replace(~r/[^a-z0-9\s]/, "")
     |> String.split()
-    |> Enum.map(fn word ->
-      %{
-        word: word,
-        pos: Map.get(@pos_data, word, [:unknown])
-      }
-    end)
+    |> Enum.map(&resolve_word/1)
+  end
+
+  defp resolve_word(word) do
+    case DB.all(from(b in BCell, where: b.word == ^word)) do
+      [] ->
+        case LexiconEnricher.enrich(word) do
+          {:ok, _} ->
+            case DB.all(from(b in BrainCell, where: b.word == ^word)) do
+              [] -> %{word: word, pos: [:unknown]}
+              results -> %{word: word, pos: Enum.map(results, & &1.pos)}
+            end
+
+          _ ->
+            %{word: word, pos: [:unknown]}
+        end
+
+      results ->
+        %{word: word, pos: Enum.map(results, & &1.pos)}
+    end
   end
 end

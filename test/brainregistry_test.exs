@@ -5,7 +5,8 @@ defmodule BrainRegistryTest do
   alias Brain
 
   setup do
-    DB.clear() # or DB.reset if you have a helper
+    # or DB.reset if you have a helper
+    DB.clear()
     :ok
   end
 
@@ -19,7 +20,7 @@ defmodule BrainRegistryTest do
     }
 
     :ok = DB.insert_many([cell])
-    
+
     # 2. Manually register and capture the pid
     {:ok, pid} = Registry.register(cell)
 
@@ -33,11 +34,11 @@ defmodule BrainRegistryTest do
 
     # 5. Check that it returns an error OR recovers
     assert is_list(result)
+
     assert Enum.any?(result, fn
-      {:error, :dead_pid} -> true
-      {:error, :call_failed} -> true
-      _ -> true
-    end)
+             {:error, :dead_pid} -> true
+             {:error, :call_failed} -> true
+             _ -> true
+           end)
   end
 end
-

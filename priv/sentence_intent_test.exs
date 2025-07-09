@@ -1,3 +1,4 @@
+
 defmodule SentenceIntent do
   @moduledoc """
   Determines the intent of a sentence based on POS tag patterns.
@@ -33,9 +34,11 @@ defmodule SentenceIntent do
     end
   end
 
+  # Computes the cartesian product of a list of lists
   defp cartesian_product([]), do: [[]]
 
   defp cartesian_product([head | tail]) do
     for h <- head, t <- cartesian_product(tail), do: [h | t]
   end
 end
+

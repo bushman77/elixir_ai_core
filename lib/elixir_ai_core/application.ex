@@ -7,7 +7,8 @@ defmodule ElixirAiCore.Application do
       {DynamicSupervisor, strategy: :one_for_one, name: BrainCellSupervisor},
       ElixirAiCore.Supervisor,
       {Brain, name: Brain},
-      Console,    # your GenServer Console process
+      # your GenServer Console process
+      Console,
       Core.DB
     ]
 
@@ -15,4 +16,3 @@ defmodule ElixirAiCore.Application do
     Supervisor.start_link(children, opts)
   end
 end
-

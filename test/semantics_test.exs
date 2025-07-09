@@ -7,22 +7,26 @@ defmodule SemanticsTest do
   describe "Process user input" do
     test "basic structure works with known words" do
       input = "hello world"
-      tokens = Tokenizer.tokenize input
+      tokens = Tokenizer.tokenize(input)
 
       assert tokens == [%{pos: [:unknown], word: "hello"}, %{pos: [:unknown], word: "world"}]
 
-      enriched = Enum.map(tokens, fn token -> 
-        token.pos
-        |> case do
-          [:unknown] ->
-            {:ok, list} = LexiconEnricher.enrich(token.word)
-            list
-          _ -> []
-        end
-      end)
+      enriched =
+        Enum.map(tokens, fn token ->
+          token.pos
+          |> case do
+            [:unknown] ->
+              {:ok, list} = LexiconEnricher.enrich(token.word)
+              list
+
+            _ ->
+              []
+          end
+        end)
+
       assert length(enriched) == 2
 
-      Enum.each(List.flatten(enriched), fn word -> 
+      Enum.each(List.flatten(enriched), fn word ->
         Brain.put(word)
       end)
 
@@ -30,4 +34,3 @@ defmodule SemanticsTest do
     end
   end
 end
-

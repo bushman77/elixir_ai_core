@@ -17,7 +17,7 @@ defmodule ElixirAiCore.MixProject do
 
   def application do
     [
-      extra_applications: [:logger],
+      extra_applications: [:logger, :runtime_tools],
       mod: {ElixirAiCore.Application, []}
     ]
   end
@@ -28,7 +28,11 @@ defmodule ElixirAiCore.MixProject do
       {:axon, "~> 0.5.1"},
       {:jason, "~> 1.4"},
       {:tesla, "~> 1.4"},
-      {:hackney, "~> 1.18"}
+      {:hackney, "~> 1.18"},
+      {:mox, "~> 1.1", only: :test},
+      {:ecto, "~> 3.10"},
+      {:ecto_sql, "~> 3.10"},
+      {:postgrex, ">= 0.0.0"}
     ]
   end
 

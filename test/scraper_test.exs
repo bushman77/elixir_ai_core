@@ -8,14 +8,15 @@ defmodule LexiconEnricherIntegrationTest do
     word = "interesting"
 
     result = LexiconEnricher.enrich(word)
-IO.inspect result
+    IO.inspect(result)
     assert {:ok, cells} = result
     assert is_list(cells)
-    assert Enum.all?(cells, fn cell -> 
-      %BrainCell{} = cell
-      cell.word == word
-      cell.definition != nil and cell.definition != ""
-    end)
+
+    assert Enum.all?(cells, fn cell ->
+             %BrainCell{} = cell
+             cell.word == word
+             cell.definition != nil and cell.definition != ""
+           end)
   end
 
   @tag :integration
@@ -25,4 +26,3 @@ IO.inspect result
     assert {:error, :not_found} = LexiconEnricher.enrich(word)
   end
 end
-

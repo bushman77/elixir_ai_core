@@ -7,13 +7,20 @@ defmodule Core.POS do
   @type pos_signature :: [[atom()]]
 
   @question_signatures [
-    [[:adverb], [:verb], [:pronoun]],       # how are you
-    [[:pronoun], [:verb]],                  # you are
-    [[:verb], [:adjective, :noun], [:pronoun]], # is good you
-    [[:verb], [:pronoun]],                  # is it
-    [[:modal], [:pronoun], [:verb]],        # can you go
-    [[:wh_determiner], [:noun], [:verb]],   # what dog runs
-    [[:adverb], [:pronoun], [:verb]]        # why you scream
+    # how are you
+    [[:adverb], [:verb], [:pronoun]],
+    # you are
+    [[:pronoun], [:verb]],
+    # is good you
+    [[:verb], [:adjective, :noun], [:pronoun]],
+    # is it
+    [[:verb], [:pronoun]],
+    # can you go
+    [[:modal], [:pronoun], [:verb]],
+    # what dog runs
+    [[:wh_determiner], [:noun], [:verb]],
+    # why you scream
+    [[:adverb], [:pronoun], [:verb]]
   ]
 
   @doc """
@@ -27,18 +34,20 @@ defmodule Core.POS do
            matches_signature?(pos_sequence, sig)
          end) do
       nil ->
-        {:answer, %{
-          intent: :unknown,
-          pos: pos_sequence,
-          input: tokens
-        }}
+        {:answer,
+         %{
+           intent: :unknown,
+           pos: pos_sequence,
+           input: tokens
+         }}
 
       matched_sig ->
-        {:answer, %{
-          intent: :question,
-          signature: matched_sig,
-          input: tokens
-        }}
+        {:answer,
+         %{
+           intent: :question,
+           signature: matched_sig,
+           input: tokens
+         }}
     end
   end
 
@@ -52,4 +61,3 @@ defmodule Core.POS do
     end)
   end
 end
-

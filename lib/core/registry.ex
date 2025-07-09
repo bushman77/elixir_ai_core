@@ -6,7 +6,7 @@ defmodule Core.Registry do
 
   Returns: `{:ok, pid}`.
   """
-  def register(%BrainCell{id: id} = cell) do
+  def register(%BCell{id: id} = cell) do
     case DynamicSupervisor.start_child(BrainCellSupervisor, {BrainCell, cell}) do
       {:ok, pid} ->
         # You register FROM the child process itself
@@ -20,7 +20,7 @@ defmodule Core.Registry do
 
   @doc """
   Selects all active BrainCells whose `word` field matches the given input.
-  Returns a list of `{id, pid, %BrainCell{}}` tuples.
+  Returns a list of `{id, pid, %BCell{}}` tuples.
   """
   def query(word) when is_binary(word) do
     Registry.select(@registry, [
@@ -34,4 +34,3 @@ defmodule Core.Registry do
     ])
   end
 end
-

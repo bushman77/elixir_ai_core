@@ -1,10 +1,12 @@
 defmodule Brain do
   use GenServer
 
+  import Ecto.Query
+
   alias Core.DB
   alias Core.Registry, as: BrainRegistry
+  alias ElixirAiCore.Schemas.BrainCell
   alias LexiconEnricher
-  alias BrainCell
 
   # ────────────────────────
   # Public API
@@ -16,7 +18,7 @@ defmodule Brain do
 
   @doc """
   Retrieves all brain cells associated with the given word.
-  Follows 3-tier lookup: Registry -> DETS -> LexiconEnricher.
+  Follows 3-tier lookup: Registry -> Ecto (Mnesia) -> LexiconEnricher.
   """
   def get(word), do: GenServer.call(__MODULE__, {:get, word})
 
@@ -30,76 +32,75 @@ defmodule Brain do
   end
 
   @impl true
-def handle_call({:get, word}, _from, state) do
-  case BrainRegistry.query(word) do
-    [] ->
-      case DB.select(word) do
-        [] ->
-          case LexiconEnricher.enrich(word) do
-            {:ok, []} ->
-              {:reply, {:error, :no_definitions_found}, state}
+  def handle_call({:get, word}, _from, state) do
+    case BrainRegistry.query(word) do
+      [] ->
+        persisted = DB.all(from(b in BrainCell, where: b.word == ^word))
 
-            {:ok, enriched_cells} ->
-              :ok = DB.insert_many(enriched_cells)
+        case persisted do
+          [] ->
+            case LexiconEnricher.enrich(word) do
+              {:ok, []} ->
+                {:reply, {:error, :no_definitions_found}, state}
 
-              statuses =
-                enriched_cells
-                |> Enum.map(fn cell ->
-                  with {:ok, pid} <- BrainRegistry.register(cell) do
-                    # Use a safe call to get status (implement safe_status/1)
-                    safe_status(pid)
-                  else
-                    err -> IO.inspect(err, label: "Register failed")
-                  end
-                end)
+              {:ok, enriched_cells} when is_list(enriched_cells) ->
+                DB.insert_all(BrainCell, Enum.map(enriched_cells, &Map.from_struct/1))
 
-              {:reply, statuses, state}
+                statuses =
+                  Enum.map(enriched_cells, fn cell ->
+                    with {:ok, pid} <- BrainRegistry.register(cell) do
+                      safe_status(pid)
+                    else
+                      err -> IO.inspect(err, label: "Register failed")
+                    end
+                  end)
 
-            {:error, reason} ->
-              {:reply, {:error, {:enrich_failed, reason}}, state}
-          end
+                {:reply, statuses, state}
 
-        persisted when is_list(persisted) ->
+              {:error, reason} ->
+                {:reply, {:error, {:enrich_failed, reason}}, state}
 
-          statuses =
-            persisted
-            |> Enum.map(fn {_id, _word, cell} ->
-              with {:ok, pid} <- BrainRegistry.register(cell) do
-                safe_status(pid)
-              else
-                err -> IO.inspect(err, label: "Register failed")
-              end
-            end)
+              other ->
+                {:reply, {:error, {:unexpected_return, other}}, state}
+            end
 
-          {:reply, statuses, state}
-      end
+          persisted_cells ->
+            statuses =
+              Enum.map(persisted_cells, fn cell ->
+                with {:ok, pid} <- BrainRegistry.register(cell) do
+                  safe_status(pid)
+                else
+                  err -> IO.inspect(err, label: "Register failed")
+                end
+              end)
 
-    active when is_list(active) ->
+            {:reply, statuses, state}
+        end
 
-      statuses =
-        Enum.map(active, fn {_id, pid, _cell} ->
+      active_cells ->
+        statuses =
+          Enum.map(active_cells, fn {_id, pid, _cell} ->
+            case safe_status(pid) do
+              {:ok, status} -> status
+              {:error, reason} -> {:error, reason}
+            end
+          end)
 
-          case safe_status(pid) do
-            {:ok, status} -> status
-            {:error, reason} -> {:error, reason}
-          end
-        end)
-
-      {:reply, statuses, state}
-  end
-end
-defp safe_status(pid) do
-  if Process.alive?(pid) do
-    try do
-      {:ok, GenServer.call(pid, :status, 5_000)}
-    catch
-      :exit, {:timeout, _} -> {:error, :timeout}
-      :exit, reason -> {:error, reason}
+        {:reply, statuses, state}
     end
-  else
-    {:error, :dead_pid}
+  end
+
+  # Safely get status from a BrainCell GenServer
+  defp safe_status(pid) do
+    if Process.alive?(pid) do
+      try do
+        {:ok, GenServer.call(pid, :status, 5_000)}
+      catch
+        :exit, {:timeout, _} -> {:error, :timeout}
+        :exit, reason -> {:error, reason}
+      end
+    else
+      {:error, :dead_pid}
+    end
   end
 end
-
-end
-
