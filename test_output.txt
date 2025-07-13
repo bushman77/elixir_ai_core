@@ -1,273 +1,672 @@
-    warning: function do_fire/5 is unused
-    │
- 41 │   defp do_fire(%BrainCell{id: id, connections: connections}, strength, depth, visited, trail) do
-    │        ~
-    │
-    └─ lib/brainsim.ex:41:8: BrainSim (module)
-
-    warning: variable "id" is unused (if the variable is not meant to be used, prefix it with an underscore)
-    │
- 54 │   def init(%{id: id} = args) do
-    │                  ~~
-    │
-    └─ lib/braincell.ex:54:18: BrainCell.init/1
-
-    warning: Brain.put/1 is undefined or private
-    │
- 67 │     Brain.put(updated)
-    │           ~
-    │
-    └─ lib/braincell.ex:67:11: BrainCell.handle_cast/2
-
-    warning: Brain.put/1 is undefined or private
-    │
- 72 │     Brain.put(state)
-    │           ~
-    │
-    └─ lib/braincell.ex:72:11: BrainCell.handle_cast/2
-
-    warning: Brain.all_ids/1 is undefined or private
-    │
- 34 │     Brain.all_ids(Brain)
-    │           ~
-    │
-    └─ lib/elixir_ai_core/brain_output.ex:34:11: BrainOutput.top_fired_cell_id/0
-
-    warning: Brain.all_ids/1 is undefined or private
-    │
- 46 │     Brain.all_ids(Brain)
-    │           ~
-    │
-    └─ lib/elixir_ai_core/brain_output.ex:46:11: BrainOutput.reset_activations/0
-
-    warning: Brain.get/2 is undefined or private. Did you mean:
-
-          * get/1
-
-    │
- 48 │       case Brain.get(Brain, id) do
-    │                  ~
-    │
-    └─ lib/elixir_ai_core/brain_output.ex:48:18: BrainOutput.reset_activations/0
-
-    warning: Brain.put/1 is undefined or private
-    │
- 50 │           Brain.put(%{cell | activation: 0.0})
-    │                 ~
-    │
-    └─ lib/elixir_ai_core/brain_output.ex:50:17: BrainOutput.reset_activations/0
-
-    warning: variable "brain_state" is unused (if the variable is not meant to be used, prefix it with an underscore)
-    │
- 12 │   defp detect_novelty(context, brain_state) do
-    │                                ~~~~~~~~~~~
-    │
-    └─ lib/curiosity_core.ex:12:32: CuriosityCore.detect_novelty/2
-
-    warning: Brain.known_concept?/1 is undefined or private
-    │
- 15 │       not Brain.known_concept?(token.word)
-    │                 ~
-    │
-    └─ lib/curiosity_core.ex:15:17: CuriosityCore.detect_novelty/2
-
-    warning: variable "brain" is unused (if the variable is not meant to be used, prefix it with an underscore)
-    │
-  5 │   def tag_verbs(tokens, brain) do
-    │                         ~~~~~
-    │
-    └─ lib/verb_identifier.ex:5:25: VerbIdentifier.tag_verbs/2
-
-    warning: variable "context_tokens" is unused (if the variable is not meant to be used, prefix it with an underscore)
-    │
- 15 │   defp apply_heuristics(token, context_tokens) do
-    │                                ~~~~~~~~~~~~~~
-    │
-    └─ lib/verb_identifier.ex:15:32: VerbIdentifier.apply_heuristics/2
-
-    warning: Brain.lookup_pos/1 is undefined or private
-    │
-  8 │       case Brain.lookup_pos(token.word) do
-    │                  ~
-    │
-    └─ lib/verb_identifier.ex:8:18: VerbIdentifier.tag_verbs/2
-
-    warning: ElixirAiCore.Supervisor.start_braincell/2 is undefined or private. Did you mean:
-
-          * start_link/1
-
-    │
- 10 │       ElixirAiCore.Supervisor.start_braincell(from, :word)
-    │                               ~
-    │
-    └─ lib/elixir_ai_core/brain_trainer.ex:10:31: ElixirAiCore.BrainTrainer.teach_chain/1
-
-    warning: ElixirAiCore.Supervisor.start_braincell/2 is undefined or private. Did you mean:
-
-          * start_link/1
-
-    │
- 11 │       ElixirAiCore.Supervisor.start_braincell(to, :word)
-    │                               ~
-    │
-    └─ lib/elixir_ai_core/brain_trainer.ex:11:31: ElixirAiCore.BrainTrainer.teach_chain/1
-
-    warning: LLM.generate_code/1 is undefined (module LLM is not available or is yet to be defined). Make sure the module name is correct and has been specified in full (or that an alias has been defined)
-    │
-  4 │     {:ok, code} = LLM.generate_code(prompt)
-    │                       ~
-    │
-    └─ lib/self_coder.ex:4:23: SelfCoder.write_function/1
-
-    warning: UUID.uuid4/0 is undefined (module UUID is not available or is yet to be defined). Make sure the module name is correct and has been specified in full (or that an alias has been defined)
-    │
-  5 │     File.write!("lib/brain/self_learned/#{UUID.uuid4()}.ex", code)
-    │                                                ~
-    │
-    └─ lib/self_coder.ex:5:48: SelfCoder.write_function/1
-
-    warning: ElixirAiCore.Core.clamp/3 is undefined (module ElixirAiCore.Core is not available or is yet to be defined)
-    │
- 41 │     new_ser = Core.clamp(cell.serotonin + deltas.serotonin, 0.0, 2.0)
-    │                    ~
-    │
-    └─ lib/withdrawl.ex:41:20: BrainCell.Withdrawal.apply_withdrawal_effect/2
-
-    warning: ElixirAiCore.Core.clamp/3 is undefined (module ElixirAiCore.Core is not available or is yet to be defined)
-    │
- 42 │     new_dop = Core.clamp(cell.dopamine + deltas.dopamine, 0.0, 2.0)
-    │                    ~
-    │
-    └─ lib/withdrawl.ex:42:20: BrainCell.Withdrawal.apply_withdrawal_effect/2
-
-    warning: ElixirAiCore.Core.infer/2 is undefined (module ElixirAiCore.Core is not available or is yet to be defined)
-    │
- 35 │     output = Core.infer(state.model, input)
-    │                   ~
-    │
-    └─ lib/elixir_ai_core/model_server.ex:35:19: ElixirAiCore.ModelServer.handle_call/3
-
-    warning: variable "type" is unused (if the variable is not meant to be used, prefix it with an underscore)
-    │
- 17 │   def ensure_started(%{id: id, type: type} = args) do
-    │                                      ~~~~
-    │
-    └─ lib/elixir_ai_core/supervisor.ex:17:38: ElixirAiCore.Supervisor.ensure_started/1
-
-    warning: ElixirAiCore.Tokenizer.tokenize/1 is undefined (module ElixirAiCore.Tokenizer is not available or is yet to be defined)
-    │
-  6 │     |> ElixirAiCore.Tokenizer.tokenize()
-    │                               ~
-    │
-    └─ lib/elixir_ai_core/phrase_classifier.ex:6:31: ElixirAiCore.PhraseClassifier.classify/1
-
-    warning: ElixirAiCore.Schemas.BrainCell.Schema.build_id/2 is undefined (module ElixirAiCore.Schemas.BrainCell.Schema is not available or is yet to be defined)
-    │
- 38 │         id = BrainCell.Schema.build_id(word, pos)
-    │                               ~
-    │
-    └─ lib/brain.ex:38:31: Brain.maybe_fire_cells/1
-
-    warning: Brain.get_cell/1 is undefined or private. Did you mean:
-
-          * get/1
-
-    │
- 40 │         case Brain.get_cell(id) do
-    │                    ~
-    │
-    └─ lib/brain.ex:40:20: Brain.maybe_fire_cells/1
-
-    warning: Brain.fire_cell/1 is undefined or private
-    │
- 42 │             Brain.fire_cell(id)
-    │                   ~
-    │
-    └─ lib/brain.ex:42:19: Brain.maybe_fire_cells/1
-
-    warning: Brain.fire_cell/1 is undefined or private
-    │
- 46 │               Brain.fire_cell(new_cell.id)
-    │                     ~
-    │
-    └─ lib/brain.ex:46:21: Brain.maybe_fire_cells/1
-
-    warning: Brain.enrich_and_start/2 is undefined or private
-    │
- 45 │             with {:ok, new_cell} <- Brain.enrich_and_start(word, pos) do
-    │                                           ~
-    │
-    └─ lib/brain.ex:45:43: Brain.maybe_fire_cells/1
-
-    warning: ElixirAiCore.Schemas.BrainCell.__schema__/1 is undefined (module ElixirAiCore.Schemas.BrainCell is not available or is yet to be defined)
-    │
- 60 │         persisted = DB.all(from(b in BrainCell, where: b.word == ^word))
-    │         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    │
-    └─ lib/brain.ex:60: Brain.handle_call/3
-
-    warning: POSTagger.tag/1 is undefined or private. Did you mean:
-
-          * tag_word/1
-
-    │
- 33 │     tagged = POSTagger.tag(tokens)
-    │                        ~
-    │
-    └─ lib/core.ex:33:24: Core.interpret/1
-
-     warning: Brain.put/1 is undefined or private
-     │
- 108 │                 Brain.put(cell)
-     │                       ~
-     │
-     └─ lib/core.ex:108:23: Core.memorize/1
-
-    warning: Brain.known_word?/1 is undefined or private
-    │
-  7 │     |> Enum.filter(fn word -> not Brain.known_word?(word) end)
-    │                                         ~
-    │
-    └─ lib/lexicon_expander.ex:7:41: LexiconExpander.expand_from_entry/1
-
-    warning: Brain.known_word?/1 is undefined or private
-    │
- 17 │     |> Enum.filter(fn w -> not Brain.known_word?(w) end)
-    │                                      ~
-    │
-    └─ lib/lexicon_expander.ex:17:38: LexiconExpander.expand_with_limit/2
-
-    warning: Brain.enrich_word/1 is undefined or private
-    │
-  8 │     |> Enum.each(fn word -> Brain.enrich_word(word) end)
-    │                                   ~
-    │
-    └─ lib/lexicon_expander.ex:8:35: LexiconExpander.expand_from_entry/1
-
-    warning: Brain.enrich_word/1 is undefined or private
-    │
- 20 │   Enum.each(new_words, &Brain.enrich_word/1)
-    │                               ~
-    │
-    └─ lib/lexicon_expander.ex:20:31: LexiconExpander.expand_with_limit/2
-
-    warning: Core.lookup_input/1 is undefined or private
-    │
- 15 │     case Core.lookup_input(word) do
-    │               ~
-    │
-    └─ lib/elixir_ai_core/pos_tagger.ex:15:15: POSTagger.tag_word/1
-
 🧠 AI Brain Console started. Type anything to begin.
->     error: cannot define module Core.DBTest because it is currently being defined in test/put_and_get_test.exs:1
-    │
-  1 │ defmodule Core.DBTest do
-    │ ^^^^^^^^^^^^^^^^^^^^^^^^
-    │
-    └─ test/core/db_test.exs:1: Core.DBTest (module)
+> Running ExUnit with seed: 576276, max_cases: 12
+
+.....
+
+  1) test word_to_id is deterministic (ElixirAiCore.TokenizerTest)
+     test/elixir_ai_core/tokenizer_test.exs:5
+     ** (UndefinedFunctionError) function ElixirAiCore.Tokenizer.word_to_id/1 is undefined (module ElixirAiCore.Tokenizer is not available)
+     code: assert Tokenizer.word_to_id("abc") == Tokenizer.word_to_id("abc")
+     stacktrace:
+       ElixirAiCore.Tokenizer.word_to_id("abc")
+       test/elixir_ai_core/tokenizer_test.exs:6: (test)
 
 
-== Compilation error in file test/core/db_test.exs ==
-** (CompileError) test/core/db_test.exs: cannot compile module Core.DBTest (errors have been logged)
-    (elixir 1.18.4) lib/kernel/parallel_compiler.ex:542: Kernel.ParallelCompiler.require_file/2
-    (elixir 1.18.4) lib/kernel/parallel_compiler.ex:425: anonymous fn/5 in Kernel.ParallelCompiler.spawn_workers/8
+
+  2) test embed returns a float between 0 and 1 (ElixirAiCore.TokenizerTest)
+     test/elixir_ai_core/tokenizer_test.exs:13
+     ** (UndefinedFunctionError) function ElixirAiCore.Tokenizer.embed/1 is undefined (module ElixirAiCore.Tokenizer is not available)
+     code: embedded = Tokenizer.embed("test")
+     stacktrace:
+       ElixirAiCore.Tokenizer.embed("test")
+       test/elixir_ai_core/tokenizer_test.exs:14: (test)
+
+...
+22:53:42.839 [error] GenServer ElixirAiCore.ModelServer terminating
+** (UndefinedFunctionError) function ElixirAiCore.Core.infer/2 is undefined (module ElixirAiCore.Core is not available)
+    ElixirAiCore.Core.infer(&ElixirAiCore.Core.dummy_model/1, %{input: "Hello"})
+    (elixir_ai_core 0.1.0) lib/elixir_ai_core/model_server.ex:35: ElixirAiCore.ModelServer.handle_call/3
+    (stdlib 7.0.1) gen_server.erl:2470: :gen_server.try_handle_call/4
+    (stdlib 7.0.1) gen_server.erl:2499: :gen_server.handle_msg/3
+    (stdlib 7.0.1) proc_lib.erl:333: :proc_lib.init_p_do_apply/3
+Last message (from #PID<0.412.0>): {:infer, %{input: "Hello"}}
+
+
+  3) test different words produce different ids (ElixirAiCore.TokenizerTest)
+     test/elixir_ai_core/tokenizer_test.exs:9
+     ** (UndefinedFunctionError) function ElixirAiCore.Tokenizer.word_to_id/1 is undefined (module ElixirAiCore.Tokenizer is not available)
+     code: refute Tokenizer.word_to_id("abc") == Tokenizer.word_to_id("bac")
+     stacktrace:
+       ElixirAiCore.Tokenizer.word_to_id("abc")
+       test/elixir_ai_core/tokenizer_test.exs:10: (test)
+
+.....
+
+  4) test inference returns model output when model is loaded (ElixirAiCore.ModelServerTest)
+     test/elixir_ai_core/model_server_test.exs:20
+     ** (EXIT from #PID<0.412.0>) an exception was raised:
+         ** (UndefinedFunctionError) function ElixirAiCore.Core.infer/2 is undefined (module ElixirAiCore.Core is not available)
+             ElixirAiCore.Core.infer(&ElixirAiCore.Core.dummy_model/1, %{input: "Hello"})
+             (elixir_ai_core 0.1.0) lib/elixir_ai_core/model_server.ex:35: ElixirAiCore.ModelServer.handle_call/3
+             (stdlib 7.0.1) gen_server.erl:2470: :gen_server.try_handle_call/4
+             (stdlib 7.0.1) gen_server.erl:2499: :gen_server.handle_msg/3
+             (stdlib 7.0.1) proc_lib.erl:333: :proc_lib.init_p_do_apply/3
+
+.........
+
+  5) test Brain.get/1 handles dead registry pid gracefully (BrainRegistryTest)
+     test/brainregistry_test.exs:13
+     ** (UndefinedFunctionError) function Core.DB.clear/0 is undefined or private
+     stacktrace:
+       (elixir_ai_core 0.1.0) Core.DB.clear()
+       test/brainregistry_test.exs:9: BrainRegistryTest.__ex_unit_setup_0/1
+       test/brainregistry_test.exs:1: BrainRegistryTest.__ex_unit__/2
+
+
+
+  6) test Process user input basic structure works with known words (SemanticsTest)
+     test/semantics_test.exs:8
+     Assertion with == failed
+     code:  assert tokens == [%{pos: [:unknown], word: "hello"}, %{pos: [:unknown], word: "world"}]
+     left:  [
+              %{
+                pos: ["noun",
+                 "verb",
+                 "interjection",
+                 "interjection",
+                 "interjection",
+                 "interjection",
+                 "interjection"],
+                word: "hello"
+              },
+              %{
+                pos: ["noun",
+                 "noun", "noun",
+                 "noun", "noun",
+                 "noun", "noun",
+                 "noun", "noun",
+                 "noun", "noun",
+                 "noun", "verb",
+                 "verb"],
+                word: "world"
+              }
+            ]
+     right: [
+              %{
+                pos: [:unknown],
+                word: "hello"
+              },
+              %{
+                pos: [:unknown],
+                word: "world"
+              }
+            ]
+     stacktrace:
+       test/semantics_test.exs:12: (test)
+
+
+
+  7) test enrich returns brain cells for a common English word (LexiconEnricherIntegrationTest)
+     test/scraper_test.exs:7
+     ** (Ecto.ConstraintError) constraint error when attempting to insert struct:
+
+         * "brain_cells_pkey" (unique_constraint)
+
+     If you would like to stop this constraint violation from raising an
+     exception and instead add it as an error to your changeset, please
+     call `unique_constraint/3` on your changeset with the constraint
+     `:name` as an option.
+
+     The changeset has not defined any constraint.
+
+     code: result = LexiconEnricher.enrich(word)
+     stacktrace:
+       (ecto 3.13.2) lib/ecto/repo/schema.ex:1052: anonymous fn/4 in Ecto.Repo.Schema.constraints_to_errors/3
+       (elixir 1.18.4) lib/enum.ex:1714: Enum."-map/2-lists^map/1-1-"/2
+       (ecto 3.13.2) lib/ecto/repo/schema.ex:1035: Ecto.Repo.Schema.constraints_to_errors/3
+       (ecto 3.13.2) lib/ecto/repo/schema.ex:1005: Ecto.Repo.Schema.apply/4
+       (ecto 3.13.2) lib/ecto/repo/schema.ex:500: anonymous fn/15 in Ecto.Repo.Schema.do_insert/4
+       (elixir_ai_core 0.1.0) lib/lexicon_enricher.ex:28: LexiconEnricher.insert_cell/1
+       (elixir 1.18.4) lib/enum.ex:987: Enum."-each/2-lists^foreach/1-0-"/2
+       (elixir_ai_core 0.1.0) lib/lexicon_enricher.ex:18: LexiconEnricher.enrich/1
+       test/scraper_test.exs:10: (test)
+
+.
+
+  8) test Tokenizer.tokenize/1 uses DB if word is already enriched (TokenizerTest)
+     test/tokenizer_test.exs:14
+     ** (UndefinedFunctionError) function Core.DB.clear/0 is undefined or private
+     stacktrace:
+       (elixir_ai_core 0.1.0) Core.DB.clear()
+       test/tokenizer_test.exs:10: TokenizerTest.__ex_unit_setup_0_0/1
+       TokenizerTest.__ex_unit_describe_0/1
+
+
+
+  9) test Tokenizer.tokenize/1 returns [:unknown] if enrichment fails (TokenizerTest)
+     test/tokenizer_test.exs:34
+     ** (UndefinedFunctionError) function Core.DB.clear/0 is undefined or private
+     stacktrace:
+       (elixir_ai_core 0.1.0) Core.DB.clear()
+       test/tokenizer_test.exs:10: TokenizerTest.__ex_unit_setup_0_0/1
+       TokenizerTest.__ex_unit_describe_0/1
+
+
+
+ 10) test Tokenizer.tokenize/1 enriches missing word and re-uses from DB (TokenizerTest)
+     test/tokenizer_test.exs:21
+     ** (UndefinedFunctionError) function Core.DB.clear/0 is undefined or private
+     stacktrace:
+       (elixir_ai_core 0.1.0) Core.DB.clear()
+       test/tokenizer_test.exs:10: TokenizerTest.__ex_unit_setup_0_0/1
+       TokenizerTest.__ex_unit_describe_0/1
+
+
+
+ 11) test applying meth overstimulates most cells (BrainCell.SubstanceEffectTest)
+     test/brain/substance_effect_test.exs:19
+     Expected truthy, got false
+     code: assert Enum.all?(updated, fn c -> c.status == :overstimulated end)
+     arguments:
+
+         # 1
+         [
+           %BrainCell{
+             __meta__: #Ecto.Schema.Metadata<:built, "brain_cells">,
+             id: :a,
+             word: nil,
+             pos: nil,
+             definition: nil,
+             example: nil,
+             examples: [],
+             synonyms: [],
+             antonyms: [],
+             type: nil,
+             function: nil,
+             activation: 0.0,
+             serotonin: 0.0,
+             dopamine: 1.8,
+             connections: [],
+             position: [0.0, 0.0,
+              0.0],
+             status: "suppressed",
+             last_dose_at: nil,
+             last_substance: nil,
+             inserted_at: nil,
+             updated_at: nil
+           },
+           %BrainCell{
+             __meta__: #Ecto.Schema.Metadata<:built, "brain_cells">,
+             id: :b,
+             word: nil,
+             pos: nil,
+             definition: nil,
+             example: nil,
+             examples: [],
+             synonyms: [],
+             antonyms: [],
+             type: nil,
+             function: nil,
+             activation: 0.0,
+             serotonin: 0.0,
+             dopamine: 1.8,
+             connections: [],
+             position: [0.0, 0.0,
+              0.0],
+             status: "suppressed",
+             last_dose_at: nil,
+             last_substance: nil,
+             inserted_at: nil,
+             updated_at: nil
+           },
+           %BrainCell{
+             __meta__: #Ecto.Schema.Metadata<:built, "brain_cells">,
+             id: :c,
+             word: nil,
+             pos: nil,
+             definition: nil,
+             example: nil,
+             examples: [],
+             synonyms: [],
+             antonyms: [],
+             type: nil,
+             function: nil,
+             activation: 0.0,
+             serotonin: 0.0,
+             dopamine: 1.8,
+             connections: [],
+             position: [0.0, 0.0,
+              0.0],
+             status: "suppressed",
+             last_dose_at: nil,
+             last_substance: nil,
+             inserted_at: nil,
+             updated_at: nil
+           }
+         ]
+
+         # 2
+         #Function<1.31471338/1 in BrainCell.SubstanceEffectTest."test applying meth overstimulates most cells"/1>
+
+     stacktrace:
+       test/brain/substance_effect_test.exs:21: (test)
+
+
+
+ 12) test cannabis mildly enhances mood (BrainCell.SubstanceEffectTest)
+     test/brain/substance_effect_test.exs:29
+     Expected truthy, got false
+     code: assert Enum.all?(updated, fn c -> c.serotonin > 1.0 end)
+     arguments:
+
+         # 1
+         [
+           %BrainCell{
+             __meta__: #Ecto.Schema.Metadata<:built, "brain_cells">,
+             id: :a,
+             word: nil,
+             pos: nil,
+             definition: nil,
+             example: nil,
+             examples: [],
+             synonyms: [],
+             antonyms: [],
+             type: nil,
+             function: nil,
+             activation: 0.0,
+             serotonin: 0.3,
+             dopamine: 0.5,
+             connections: [],
+             position: [0.0, 0.0,
+              0.0],
+             status: "suppressed",
+             last_dose_at: nil,
+             last_substance: nil,
+             inserted_at: nil,
+             updated_at: nil
+           },
+           %BrainCell{
+             __meta__: #Ecto.Schema.Metadata<:built, "brain_cells">,
+             id: :b,
+             word: nil,
+             pos: nil,
+             definition: nil,
+             example: nil,
+             examples: [],
+             synonyms: [],
+             antonyms: [],
+             type: nil,
+             function: nil,
+             activation: 0.0,
+             serotonin: 0.3,
+             dopamine: 0.5,
+             connections: [],
+             position: [0.0, 0.0,
+              0.0],
+             status: "suppressed",
+             last_dose_at: nil,
+             last_substance: nil,
+             inserted_at: nil,
+             updated_at: nil
+           },
+           %BrainCell{
+             __meta__: #Ecto.Schema.Metadata<:built, "brain_cells">,
+             id: :c,
+             word: nil,
+             pos: nil,
+             definition: nil,
+             example: nil,
+             examples: [],
+             synonyms: [],
+             antonyms: [],
+             type: nil,
+             function: nil,
+             activation: 0.0,
+             serotonin: 0.3,
+             dopamine: 0.5,
+             connections: [],
+             position: [0.0, 0.0,
+              0.0],
+             status: "suppressed",
+             last_dose_at: nil,
+             last_substance: nil,
+             inserted_at: nil,
+             updated_at: nil
+           }
+         ]
+
+         # 2
+         #Function<2.31471338/1 in BrainCell.SubstanceEffectTest."test cannabis mildly enhances mood"/1>
+
+     stacktrace:
+       test/brain/substance_effect_test.exs:31: (test)
+
+
+
+ 13) test applying alcohol suppresses cells (BrainCell.SubstanceEffectTest)
+     test/brain/substance_effect_test.exs:24
+     Expected truthy, got false
+     code: assert Enum.all?(updated, fn c -> c.status in [:suppressed, :inactive] end)
+     arguments:
+
+         # 1
+         [
+           %BrainCell{
+             __meta__: #Ecto.Schema.Metadata<:built, "brain_cells">,
+             id: :a,
+             word: nil,
+             pos: nil,
+             definition: nil,
+             example: nil,
+             examples: [],
+             synonyms: [],
+             antonyms: [],
+             type: nil,
+             function: nil,
+             activation: 0.0,
+             serotonin: 0.0,
+             dopamine: 0.2,
+             connections: [],
+             position: [0.0, 0.0,
+              0.0],
+             status: "suppressed",
+             last_dose_at: nil,
+             last_substance: nil,
+             inserted_at: nil,
+             updated_at: nil
+           },
+           %BrainCell{
+             __meta__: #Ecto.Schema.Metadata<:built, "brain_cells">,
+             id: :b,
+             word: nil,
+             pos: nil,
+             definition: nil,
+             example: nil,
+             examples: [],
+             synonyms: [],
+             antonyms: [],
+             type: nil,
+             function: nil,
+             activation: 0.0,
+             serotonin: 0.0,
+             dopamine: 0.2,
+             connections: [],
+             position: [0.0, 0.0,
+              0.0],
+             status: "suppressed",
+             last_dose_at: nil,
+             last_substance: nil,
+             inserted_at: nil,
+             updated_at: nil
+           },
+           %BrainCell{
+             __meta__: #Ecto.Schema.Metadata<:built, "brain_cells">,
+             id: :c,
+             word: nil,
+             pos: nil,
+             definition: nil,
+             example: nil,
+             examples: [],
+             synonyms: [],
+             antonyms: [],
+             type: nil,
+             function: nil,
+             activation: 0.0,
+             serotonin: 0.0,
+             dopamine: 0.2,
+             connections: [],
+             position: [0.0, 0.0,
+              0.0],
+             status: "suppressed",
+             last_dose_at: nil,
+             last_substance: nil,
+             inserted_at: nil,
+             updated_at: nil
+           }
+         ]
+
+         # 2
+         #Function<0.31471338/1 in BrainCell.SubstanceEffectTest."test applying alcohol suppresses cells"/1>
+
+     stacktrace:
+       test/brain/substance_effect_test.exs:26: (test)
+
+
+
+ 14) test withdrawal triggers after substance delay (BrainCell.SubstanceEffectTest)
+     test/brain/substance_effect_test.exs:34
+     Assertion with == failed
+     code:  assert dosed.status == :suppressed
+     left:  "suppressed"
+     right: :suppressed
+     stacktrace:
+       test/brain/substance_effect_test.exs:44: (test)
+
+
+
+ 15) test teaches and recalls a simple sentence chain (ElixirAiCore.BrainTrainerTest)
+     test/elixir_ai_core/brain_trainer_test.exs:17
+     ** (UndefinedFunctionError) function ElixirAiCore.Supervisor.start_braincell/2 is undefined or private. Did you mean:
+
+           * start_link/1
+
+     code: assert :ok = BrainTrainer.teach_chain(@phrase)
+     stacktrace:
+       (elixir_ai_core 0.1.0) ElixirAiCore.Supervisor.start_braincell("hey", :word)
+       (elixir_ai_core 0.1.0) lib/elixir_ai_core/brain_trainer.ex:10: anonymous fn/1 in ElixirAiCore.BrainTrainer.teach_chain/1
+       (elixir 1.18.4) lib/enum.ex:987: Enum."-each/2-lists^foreach/1-0-"/2
+       (elixir_ai_core 0.1.0) lib/elixir_ai_core/brain_trainer.ex:8: ElixirAiCore.BrainTrainer.teach_chain/1
+       test/elixir_ai_core/brain_trainer_test.exs:19: (test)
+
+
+
+ 16) test get/2 returns a cell by id (Core.DBTest)
+     test/core/db_test.exs:19
+     ** (RuntimeError) failed to start child with the spec Core.DB.
+     Reason: bad child specification, got: {:already_started, #PID<0.264.0>}
+     stacktrace:
+       (ex_unit 1.18.4) lib/ex_unit/callbacks.ex:590: ExUnit.Callbacks.start_supervised!/2
+       test/core/db_test.exs:7: Core.DBTest.__ex_unit_setup_0/1
+       test/core/db_test.exs:1: Core.DBTest.__ex_unit__/2
+
+
+
+ 17) test get/1 defaults to word mode (Core.DBTest)
+     test/core/db_test.exs:30
+     ** (RuntimeError) failed to start child with the spec Core.DB.
+     Reason: bad child specification, got: {:already_started, #PID<0.264.0>}
+     stacktrace:
+       (ex_unit 1.18.4) lib/ex_unit/callbacks.ex:590: ExUnit.Callbacks.start_supervised!/2
+       test/core/db_test.exs:7: Core.DBTest.__ex_unit_setup_0/1
+       test/core/db_test.exs:1: Core.DBTest.__ex_unit__/2
+
+
+
+ 18) test get/2 returns list of cells by word (Core.DBTest)
+     test/core/db_test.exs:23
+     ** (RuntimeError) failed to start child with the spec Core.DB.
+     Reason: bad child specification, got: {:already_started, #PID<0.264.0>}
+     stacktrace:
+       (ex_unit 1.18.4) lib/ex_unit/callbacks.ex:590: ExUnit.Callbacks.start_supervised!/2
+       test/core/db_test.exs:7: Core.DBTest.__ex_unit_setup_0/1
+       test/core/db_test.exs:1: Core.DBTest.__ex_unit__/2
+
+
+
+ 19) test intent_from_word_pos_list/1 recognizes greeting from pattern (ElixirAiCore.SentenceIntentTest)
+     test/elixir_ai_core/sentence_intent_test.exs:6
+     ** (UndefinedFunctionError) function ElixirAiCore.Schemas.BrainCell.Schema.build_id/2 is undefined (module ElixirAiCore.Schemas.BrainCell.Schema is not available)
+     code: assert SentenceIntent.intent_from_word_pos_list(pos_list) == :greeting
+     stacktrace:
+       ElixirAiCore.Schemas.BrainCell.Schema.build_id("Hello", :interjection)
+       (elixir_ai_core 0.1.0) lib/brain.ex:38: anonymous fn/1 in Brain.maybe_fire_cells/1
+       (elixir 1.18.4) lib/enum.ex:987: Enum."-each/2-lists^foreach/1-0-"/2
+       (elixir_ai_core 0.1.0) lib/elixir_ai_core/sentence_intent.ex:92: SentenceIntent.intent_from_word_pos_list/1
+       test/elixir_ai_core/sentence_intent_test.exs:8: (test)
+
+
+
+ 20) test intent_from_word_pos_list/1 recognizes question pattern (ElixirAiCore.SentenceIntentTest)
+     test/elixir_ai_core/sentence_intent_test.exs:16
+     ** (UndefinedFunctionError) function ElixirAiCore.Schemas.BrainCell.Schema.build_id/2 is undefined (module ElixirAiCore.Schemas.BrainCell.Schema is not available)
+     code: assert SentenceIntent.intent_from_word_pos_list(pos_list) == :question
+     stacktrace:
+       ElixirAiCore.Schemas.BrainCell.Schema.build_id("What", :wh_pronoun)
+       (elixir_ai_core 0.1.0) lib/brain.ex:38: anonymous fn/1 in Brain.maybe_fire_cells/1
+       (elixir 1.18.4) lib/enum.ex:987: Enum."-each/2-lists^foreach/1-0-"/2
+       (elixir_ai_core 0.1.0) lib/elixir_ai_core/sentence_intent.ex:92: SentenceIntent.intent_from_word_pos_list/1
+       test/elixir_ai_core/sentence_intent_test.exs:18: (test)
+
+
+
+ 21) test intent_from_word_pos_list/1 returns :unknown for unmatched input (ElixirAiCore.SentenceIntentTest)
+     test/elixir_ai_core/sentence_intent_test.exs:69
+     ** (UndefinedFunctionError) function ElixirAiCore.Schemas.BrainCell.Schema.build_id/2 is undefined (module ElixirAiCore.Schemas.BrainCell.Schema is not available)
+     code: assert SentenceIntent.intent_from_word_pos_list(pos_list) == :unknown
+     stacktrace:
+       ElixirAiCore.Schemas.BrainCell.Schema.build_id("Blue", :adjective)
+       (elixir_ai_core 0.1.0) lib/brain.ex:38: anonymous fn/1 in Brain.maybe_fire_cells/1
+       (elixir 1.18.4) lib/enum.ex:987: Enum."-each/2-lists^foreach/1-0-"/2
+       (elixir_ai_core 0.1.0) lib/elixir_ai_core/sentence_intent.ex:92: SentenceIntent.intent_from_word_pos_list/1
+       test/elixir_ai_core/sentence_intent_test.exs:75: (test)
+
+
+
+ 22) test intent_from_word_pos_list/1 recognizes exclamation pattern (ElixirAiCore.SentenceIntentTest)
+     test/elixir_ai_core/sentence_intent_test.exs:26
+     ** (UndefinedFunctionError) function ElixirAiCore.Schemas.BrainCell.Schema.build_id/2 is undefined (module ElixirAiCore.Schemas.BrainCell.Schema is not available)
+     code: assert SentenceIntent.intent_from_word_pos_list(pos_list) == :exclamation
+     stacktrace:
+       ElixirAiCore.Schemas.BrainCell.Schema.build_id("Wow", :interjection)
+       (elixir_ai_core 0.1.0) lib/brain.ex:38: anonymous fn/1 in Brain.maybe_fire_cells/1
+       (elixir 1.18.4) lib/enum.ex:987: Enum."-each/2-lists^foreach/1-0-"/2
+       (elixir_ai_core 0.1.0) lib/elixir_ai_core/sentence_intent.ex:92: SentenceIntent.intent_from_word_pos_list/1
+       test/elixir_ai_core/sentence_intent_test.exs:28: (test)
+
+
+
+ 23) test intent_from_word_pos_list/1 recognizes negation pattern (ElixirAiCore.SentenceIntentTest)
+     test/elixir_ai_core/sentence_intent_test.exs:31
+     ** (UndefinedFunctionError) function ElixirAiCore.Schemas.BrainCell.Schema.build_id/2 is undefined (module ElixirAiCore.Schemas.BrainCell.Schema is not available)
+     code: assert SentenceIntent.intent_from_word_pos_list(pos_list) == :negation
+     stacktrace:
+       ElixirAiCore.Schemas.BrainCell.Schema.build_id("I", :pronoun)
+       (elixir_ai_core 0.1.0) lib/brain.ex:38: anonymous fn/1 in Brain.maybe_fire_cells/1
+       (elixir 1.18.4) lib/enum.ex:987: Enum."-each/2-lists^foreach/1-0-"/2
+       (elixir_ai_core 0.1.0) lib/elixir_ai_core/sentence_intent.ex:92: SentenceIntent.intent_from_word_pos_list/1
+       test/elixir_ai_core/sentence_intent_test.exs:38: (test)
+
+
+
+ 24) test intent_from_word_pos_list/1 recognizes greeting from fallback word (ElixirAiCore.SentenceIntentTest)
+     test/elixir_ai_core/sentence_intent_test.exs:11
+     ** (UndefinedFunctionError) function ElixirAiCore.Schemas.BrainCell.Schema.build_id/2 is undefined (module ElixirAiCore.Schemas.BrainCell.Schema is not available)
+     code: assert SentenceIntent.intent_from_word_pos_list(pos_list) == :greeting
+     stacktrace:
+       ElixirAiCore.Schemas.BrainCell.Schema.build_id("Hi", :unknown)
+       (elixir_ai_core 0.1.0) lib/brain.ex:38: anonymous fn/1 in Brain.maybe_fire_cells/1
+       (elixir 1.18.4) lib/enum.ex:987: Enum."-each/2-lists^foreach/1-0-"/2
+       (elixir_ai_core 0.1.0) lib/elixir_ai_core/sentence_intent.ex:92: SentenceIntent.intent_from_word_pos_list/1
+       test/elixir_ai_core/sentence_intent_test.exs:13: (test)
+
+
+
+ 25) test intent_from_word_pos_list/1 recognizes request pattern (ElixirAiCore.SentenceIntentTest)
+     test/elixir_ai_core/sentence_intent_test.exs:41
+     ** (UndefinedFunctionError) function ElixirAiCore.Schemas.BrainCell.Schema.build_id/2 is undefined (module ElixirAiCore.Schemas.BrainCell.Schema is not available)
+     code: assert SentenceIntent.intent_from_word_pos_list(pos_list) == :request
+     stacktrace:
+       ElixirAiCore.Schemas.BrainCell.Schema.build_id("Could", :modal)
+       (elixir_ai_core 0.1.0) lib/brain.ex:38: anonymous fn/1 in Brain.maybe_fire_cells/1
+       (elixir 1.18.4) lib/enum.ex:987: Enum."-each/2-lists^foreach/1-0-"/2
+       (elixir_ai_core 0.1.0) lib/elixir_ai_core/sentence_intent.ex:92: SentenceIntent.intent_from_word_pos_list/1
+       test/elixir_ai_core/sentence_intent_test.exs:47: (test)
+
+
+
+ 26) test intent_from_word_pos_list/1 recognizes affirmation from fallback word (ElixirAiCore.SentenceIntentTest)
+     test/elixir_ai_core/sentence_intent_test.exs:55
+     ** (UndefinedFunctionError) function ElixirAiCore.Schemas.BrainCell.Schema.build_id/2 is undefined (module ElixirAiCore.Schemas.BrainCell.Schema is not available)
+     code: assert SentenceIntent.intent_from_word_pos_list(pos_list) == :affirmation
+     stacktrace:
+       ElixirAiCore.Schemas.BrainCell.Schema.build_id("Yeah", :unknown)
+       (elixir_ai_core 0.1.0) lib/brain.ex:38: anonymous fn/1 in Brain.maybe_fire_cells/1
+       (elixir 1.18.4) lib/enum.ex:987: Enum."-each/2-lists^foreach/1-0-"/2
+       (elixir_ai_core 0.1.0) lib/elixir_ai_core/sentence_intent.ex:92: SentenceIntent.intent_from_word_pos_list/1
+       test/elixir_ai_core/sentence_intent_test.exs:57: (test)
+
+
+
+ 27) test intent_from_word_pos_list/1 recognizes affirmation from pattern (ElixirAiCore.SentenceIntentTest)
+     test/elixir_ai_core/sentence_intent_test.exs:50
+     ** (UndefinedFunctionError) function ElixirAiCore.Schemas.BrainCell.Schema.build_id/2 is undefined (module ElixirAiCore.Schemas.BrainCell.Schema is not available)
+     code: assert SentenceIntent.intent_from_word_pos_list(pos_list) == :affirmation
+     stacktrace:
+       ElixirAiCore.Schemas.BrainCell.Schema.build_id("Yes", :affirmative)
+       (elixir_ai_core 0.1.0) lib/brain.ex:38: anonymous fn/1 in Brain.maybe_fire_cells/1
+       (elixir 1.18.4) lib/enum.ex:987: Enum."-each/2-lists^foreach/1-0-"/2
+       (elixir_ai_core 0.1.0) lib/elixir_ai_core/sentence_intent.ex:92: SentenceIntent.intent_from_word_pos_list/1
+       test/elixir_ai_core/sentence_intent_test.exs:52: (test)
+
+
+
+ 28) test intent_from_word_pos_list/1 recognizes statement from pattern (ElixirAiCore.SentenceIntentTest)
+     test/elixir_ai_core/sentence_intent_test.exs:60
+     ** (UndefinedFunctionError) function ElixirAiCore.Schemas.BrainCell.Schema.build_id/2 is undefined (module ElixirAiCore.Schemas.BrainCell.Schema is not available)
+     code: assert SentenceIntent.intent_from_word_pos_list(pos_list) == :statement
+     stacktrace:
+       ElixirAiCore.Schemas.BrainCell.Schema.build_id("The", :determiner)
+       (elixir_ai_core 0.1.0) lib/brain.ex:38: anonymous fn/1 in Brain.maybe_fire_cells/1
+       (elixir 1.18.4) lib/enum.ex:987: Enum."-each/2-lists^foreach/1-0-"/2
+       (elixir_ai_core 0.1.0) lib/elixir_ai_core/sentence_intent.ex:92: SentenceIntent.intent_from_word_pos_list/1
+       test/elixir_ai_core/sentence_intent_test.exs:66: (test)
+
+
+
+ 29) test intent_from_word_pos_list/1 recognizes command pattern (ElixirAiCore.SentenceIntentTest)
+     test/elixir_ai_core/sentence_intent_test.exs:21
+     ** (UndefinedFunctionError) function ElixirAiCore.Schemas.BrainCell.Schema.build_id/2 is undefined (module ElixirAiCore.Schemas.BrainCell.Schema is not available)
+     code: assert SentenceIntent.intent_from_word_pos_list(pos_list) == :command
+     stacktrace:
+       ElixirAiCore.Schemas.BrainCell.Schema.build_id("Go", :verb)
+       (elixir_ai_core 0.1.0) lib/brain.ex:38: anonymous fn/1 in Brain.maybe_fire_cells/1
+       (elixir 1.18.4) lib/enum.ex:987: Enum."-each/2-lists^foreach/1-0-"/2
+       (elixir_ai_core 0.1.0) lib/elixir_ai_core/sentence_intent.ex:92: SentenceIntent.intent_from_word_pos_list/1
+       test/elixir_ai_core/sentence_intent_test.exs:23: (test)
+
+
+
+ 30) test get/2 returns a cell by id (Core.DBTest)
+     test/core/db_test.exs:19
+     ** (RuntimeError) failed to start child with the spec Core.DB.
+     Reason: bad child specification, got: {:already_started, #PID<0.264.0>}
+     stacktrace:
+       (ex_unit 1.18.4) lib/ex_unit/callbacks.ex:590: ExUnit.Callbacks.start_supervised!/2
+       test/core/db_test.exs:7: Core.DBTest.__ex_unit_setup_0/1
+       test/core/db_test.exs:1: Core.DBTest.__ex_unit__/2
+
+
+
+ 31) test get/1 defaults to word mode (Core.DBTest)
+     test/core/db_test.exs:30
+     ** (RuntimeError) failed to start child with the spec Core.DB.
+     Reason: bad child specification, got: {:already_started, #PID<0.264.0>}
+     stacktrace:
+       (ex_unit 1.18.4) lib/ex_unit/callbacks.ex:590: ExUnit.Callbacks.start_supervised!/2
+       test/core/db_test.exs:7: Core.DBTest.__ex_unit_setup_0/1
+       test/core/db_test.exs:1: Core.DBTest.__ex_unit__/2
+
+
+
+ 32) test get/2 returns list of cells by word (Core.DBTest)
+     test/core/db_test.exs:23
+     ** (RuntimeError) failed to start child with the spec Core.DB.
+     Reason: bad child specification, got: {:already_started, #PID<0.264.0>}
+     stacktrace:
+       (ex_unit 1.18.4) lib/ex_unit/callbacks.ex:590: ExUnit.Callbacks.start_supervised!/2
+       test/core/db_test.exs:7: Core.DBTest.__ex_unit_setup_0/1
+       test/core/db_test.exs:1: Core.DBTest.__ex_unit__/2
+
+
+Finished in 1.2 seconds (0.9s async, 0.2s sync)
+55 tests, 32 failures
