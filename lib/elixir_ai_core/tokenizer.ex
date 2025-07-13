@@ -5,7 +5,6 @@ defmodule Tokenizer do
   """
   import Ecto.Query
 
-  alias BCell
   alias Core.DB
   alias BrainCell
   alias LexiconEnricher
@@ -47,7 +46,7 @@ defmodule Tokenizer do
   end
 
   defp resolve_word(word) do
-    case DB.all(from(b in BCell, where: b.word == ^word)) do
+    case DB.all(from(b in BrainCell, where: b.word == ^word)) do
       [] ->
         case LexiconEnricher.enrich(word) do
           {:ok, _} ->

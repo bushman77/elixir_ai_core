@@ -10,7 +10,6 @@ import Ecto.Query
   alias Tokenizer
   alias Core
   alias LexiconEnricher
-  alias BCell
   alias Core.DB
   alias Brain
 
@@ -69,7 +68,7 @@ import Ecto.Query
 
     case LexiconEnricher.enrich(word) do
       :ok ->
-        entries = DB.all(from b in BCell, where: b.word == ^word)
+        entries = DB.all(from b in BrainCell, where: b.word == ^word)
 
         case entries do
           [] ->
@@ -78,7 +77,7 @@ import Ecto.Query
           _ ->
             IO.puts("✅ Enriched '#{word}' with:")
             Enum.each(entries, fn
-              %BCell{pos: pos, definition: defn} ->
+              %BrainCell{pos: pos, definition: defn} ->
                 IO.puts(" • [#{pos}] #{defn}")
 
               other ->
@@ -100,7 +99,7 @@ import Ecto.Query
 
     Enum.each(tokens, fn token ->
       if token.pos == [:unknown] do
-        case DB.all(from b in BCell, where: b.word == ^token.word) do
+        case DB.all(from b in BrainCell, where: b.word == ^token.word) do
           [] -> IO.puts("⚠️ No brain cells found for #{token.word}")
           _ -> :ok
         end

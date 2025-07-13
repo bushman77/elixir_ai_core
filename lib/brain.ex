@@ -31,6 +31,28 @@ defmodule Brain do
     {:ok, []}
   end
 
+def maybe_fire_cells(pos_lists) do
+  Enum.each(pos_lists, fn word_pos_list ->
+    Enum.each(word_pos_list, fn
+      {word, pos} ->
+        id = BrainCell.Schema.build_id(word, pos)
+
+        case Brain.get_cell(id) do
+          {:ok, _cell} ->
+            Brain.fire_cell(id)
+
+          :not_found ->
+            with {:ok, new_cell} <- Brain.enrich_and_start(word, pos) do
+              Brain.fire_cell(new_cell.id)
+            end
+        end
+
+      _ -> :noop
+    end)
+  end)
+end
+
+
   @impl true
   def handle_call({:get, word}, _from, state) do
     case BrainRegistry.query(word) do

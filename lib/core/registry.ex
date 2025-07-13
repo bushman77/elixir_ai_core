@@ -6,7 +6,7 @@ defmodule Core.Registry do
 
   Returns: `{:ok, pid}`.
   """
-  def register(%BCell{id: id} = cell) do
+  def register(%BrainCell{id: id} = cell) do
     case DynamicSupervisor.start_child(BrainCellSupervisor, {BrainCell, cell}) do
       {:ok, pid} ->
         # You register FROM the child process itself

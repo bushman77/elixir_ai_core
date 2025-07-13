@@ -1,80 +1,63 @@
-defmodule BrainCellServer do
+defmodule BrainCell do
   use GenServer
+  use Ecto.Schema
+  import Ecto.Changeset
   require Logger
-  alias __MODULE__
-  alias Brain
-  alias Core
 
   @default_suppression_threshold 0.4
   @default_overstim_threshold 1.6
 
-  @type id :: String.t()
-  @type position :: {float(), float(), float()}
-  @type connection :: %{target_id: id(), weight: float(), delay_ms: non_neg_integer()}
-  @type substance :: :serotonin | :dopamine | :acetylcholine | :norepinephrine | atom()
+  @primary_key {:id, :string, autogenerate: false}
+  schema "brain_cells" do
+    field :word, :string
+    field :pos, :string
+    field :definition, :string
+    field :example, :string
+    field :examples, {:array, :string}, default: []
+    field :synonyms, {:array, :string}, default: []
+    field :antonyms, {:array, :string}, default: []
+    field :type, :string
+    field :function, :string
+    field :activation, :float, default: 0.0
+    field :serotonin, :float, default: 0.0
+    field :dopamine, :float, default: 0.0
+    field :connections, {:array, :string}, default: []
+    field :position, {:array, :float}, default: [0.0, 0.0, 0.0]
+    field :status, Ecto.Enum, values: [:active, :suppressed, :overstimulated]
 
-  @type t :: %__MODULE__{
-          id: id(),
-          word: String.t(),
-          type: atom(),
-          pos: atom(),
-          definition: String.t(),
-          example: String.t() | nil,
-          synonyms: [String.t()],
-          antonyms: [String.t()],
-          connections: [connection()],
-          status: :active | :inactive | :suppressed | :overstimulated,
-          activation: float(),
-          position: position(),
-          serotonin: float(),
-          dopamine: float(),
-          last_dose_at: integer() | nil,
-          last_substance: substance() | nil
-        }
+    field :last_dose_at, :utc_datetime_usec
+    field :last_substance, :string
+    timestamps()
+  end
 
-  defstruct [
-    :id,
-    :word,
-    :type,
-    :pos,
-    :definition,
-    :example,
-    :synonyms,
-    :antonyms,
-    :activation,
-    :serotonin,
-    :dopamine,
-    :connections,
-    :position,
-    :status,
-    :last_dose_at,
-    :last_substance
-  ]
+  # -- Changeset for DB
+  def changeset(cell, attrs) do
+    cell
+    |> cast(attrs, __schema__(:fields))
+    |> validate_required([:id, :word, :pos])
+  end
 
-  # Public API
+  # -- GenServer API
+
   def start_link(%{id: id} = args) do
     GenServer.start_link(__MODULE__, args, name: via(id))
   end
 
   def via(id), do: {:via, Registry, {BrainCell.Registry, id}}
 
-  def fire(id, strength) do
-    GenServer.cast(via(id), {:fire, strength})
-  end
+  def fire(id, strength), do: GenServer.cast(via(id), {:fire, strength})
 
   def state(id), do: GenServer.call(via(id), :get_state)
 
-  # Server Callbacks
-  def init(%{id: id}), do: init(id)
+  # -- GenServer Callbacks
 
-  def init(id) do
-    state =
-      %BCell{
-        id: id,
-        position: {0.0, 0.0, 0.0},
-        activation: 0.0,
-        connections: []
-      }
+  def init(%{id: id} = args) do
+    state = struct(__MODULE__, Map.merge(%{
+      position: "0.0,0.0,0.0",
+      activation: 0.0,
+      connections: [],
+      status: "active"
+    }, args))
 
     {:ok, state}
   end
@@ -85,6 +68,16 @@ defmodule BrainCellServer do
     {:noreply, updated}
   end
 
+  def handle_cast({:fire, strength}, state) do
+    Brain.put(state)
+
+    Enum.each(state.connections || [], fn target_id ->
+      BrainCell.fire(target_id, strength * 1.0)
+    end)
+
+    {:noreply, %{state | activation: state.activation + strength}}
+  end
+
   def handle_info({:register_self, registry, id, _cell}, state) do
     Registry.register(registry, id, state)
     {:noreply, state}
@@ -92,22 +85,9 @@ defmodule BrainCellServer do
 
   def handle_call(:get_state, _from, state), do: {:reply, state, state}
 
-  def handle_cast({:fire, strength}, state) do
-    Brain.put(state)
+  def handle_call(:status, _from, state), do: {:reply, {:ok, state}, state}
 
-    Enum.each(state.connections || [], fn conn ->
-      new_strength = strength * conn.weight
-      BrainCell.fire(conn.target_id, new_strength)
-    end)
-
-    {:noreply, %{state | activation: state.activation + strength}}
-  end
-
-  def handle_call(:status, _from, state) do
-    {:reply, {:ok, state}, state}
-  end
-
-  @doc "Applies serotonin/dopamine changes, optionally tracking substance and time"
+  # -- Chemical simulation
   def apply_chemical_change(
         %__MODULE__{} = cell,
         %{dopamine: d, serotonin: s},
@@ -128,16 +108,14 @@ defmodule BrainCellServer do
     }
   end
 
-  @doc "Evaluates cell status from neurotransmitter levels and thresholds"
   def evaluate_status(serotonin, dopamine, suppression_threshold, overstim_threshold) do
     cond do
-      serotonin <= suppression_threshold -> :suppressed
-      dopamine > overstim_threshold -> :overstimulated
-      true -> :active
+      serotonin <= suppression_threshold -> "suppressed"
+      dopamine > overstim_threshold -> "overstimulated"
+      true -> "active"
     end
   end
 
-  @doc "Evaluates cell status using default thresholds"
   def evaluate_status(serotonin, dopamine) do
     evaluate_status(
       serotonin,
@@ -147,3 +125,4 @@ defmodule BrainCellServer do
     )
   end
 end
+

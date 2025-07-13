@@ -6,6 +6,8 @@ defmodule Core do
 
   alias Brain
   alias BrainCell
+  alias LexiconEnricher
+  import Core.POS, only: [normalize_pos: 1]
 
   # --- Inference Model Interface ---
 
@@ -49,15 +51,16 @@ defmodule Core do
             antonyms: [String.t()]
           }
         ]
-  def extract_definitions(%{"word" => word, "meanings" => meanings}) do
+  def extract_definitions(%{"word" => word, "meanings" => meanings}) when is_list(meanings) do
     Enum.flat_map(meanings, fn %{"partOfSpeech" => pos_str, "definitions" => defs} ->
       pos = normalize_pos(pos_str)
+      defs = defs || []
 
       Enum.map(defs, fn def ->
         %{
           word: word,
           pos: pos,
-          definition: def["definition"],
+          definition: def["definition"] || "",
           example: def["example"],
           synonyms: def["synonyms"] || [],
           antonyms: def["antonyms"] || []
@@ -72,7 +75,7 @@ defmodule Core do
   def to_brain_cells(definitions) when is_list(definitions) do
     Enum.with_index(definitions, 1)
     |> Enum.map(fn {entry, index} ->
-      %BCell{
+      %BrainCell{
         id: "#{entry.word}|#{entry.pos}|#{index}",
         word: entry.word,
         pos: entry.pos,
@@ -84,7 +87,7 @@ defmodule Core do
         serotonin: 1.0,
         dopamine: 1.0,
         connections: [],
-        position: {0.0, 0.0, 0.0},
+        position: [0.0, 0.0, 0.0],
         status: :active,
         last_dose_at: nil,
         last_substance: nil,
@@ -96,12 +99,12 @@ defmodule Core do
   @spec memorize([BrainCell.t()]) :: {:ok, [String.t()]} | {:error, list()}
   def memorize(cells) when is_list(cells) do
     results =
-      Enum.map(cells, fn %BCell{id: id} = cell ->
+      Enum.map(cells, fn %BrainCell{id: id} = cell ->
         case Registry.lookup(BrainCell.Registry, id) do
           [] ->
             case BrainCell.start_link(cell) do
               {:ok, _pid} ->
-                IO.inspect(cell)
+                debug_log(cell)
                 Brain.put(cell)
                 {:ok, id}
 
@@ -135,11 +138,20 @@ defmodule Core do
   defp resolve_and_classify(_input, 5), do: {:error, :dictionary_missing}
 
   defp resolve_and_classify(input, depth) do
-    tokens = Tokenizer.tokenize(input)
-    unknowns = for %{word: word, pos: [:unknown]} <- tokens, do: word
+    tokens =
+      Tokenizer.tokenize(input)
+      # keep full POS list (do NOT reduce to a single pos)
+      |> Enum.map(fn %{word: word, pos: pos_list} ->
+        %{word: word, pos: pos_list}
+      end)
+
+    unknowns =
+      tokens
+      |> Enum.filter(fn %{pos: pos_list} -> Enum.member?(pos_list, :unknown) end)
+      |> Enum.map(& &1.word)
 
     if unknowns == [] do
-      {:answer, Core.POS.classify_input(tokens)}
+      Core.POS.classify_input(tokens)
     else
       results =
         Enum.map(unknowns, fn word ->
@@ -161,17 +173,20 @@ defmodule Core do
 
   @doc "Clamps a float value between min and max."
   def clamp(val), do: clamp(val, 0.0, 2.0)
+
   @spec clamp(float(), float(), float()) :: float()
   def clamp(val, min, max) when is_float(val) and is_float(min) and is_float(max) do
     val |> max(min) |> min(max)
   end
 
-  # --- Helpers ---
+  # --- Debug Logging Helper ---
 
-  defp normalize_pos("noun"), do: :noun
-  defp normalize_pos("verb"), do: :verb
-  defp normalize_pos("adjective"), do: :adjective
-  defp normalize_pos("adverb"), do: :adverb
-  defp normalize_pos("interjection"), do: :interjection
-  defp normalize_pos(_), do: :unknown
+  defp debug_log(value) do
+    if Application.get_env(:elixir_ai_core, :debug, false) do
+      IO.inspect(value, label: "DEBUG")
+    else
+      :ok
+    end
+  end
 end
+

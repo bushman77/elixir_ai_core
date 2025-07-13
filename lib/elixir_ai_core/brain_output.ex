@@ -38,7 +38,7 @@ defmodule BrainOutput do
     |> List.first()
     |> case do
       nil -> nil
-      %BCell{id: id} -> id
+      %BrainCell{id: id} -> id
     end
   end
 
@@ -46,7 +46,7 @@ defmodule BrainOutput do
     Brain.all_ids(Brain)
     |> Enum.each(fn id ->
       case Brain.get(Brain, id) do
-        %BCell{} = cell ->
+        %BrainCell{} = cell ->
           Brain.put(%{cell | activation: 0.0})
 
         _ ->

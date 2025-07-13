@@ -14,7 +14,7 @@ defmodule ElixirAiCore.BrainTrainer do
       from_cell = BrainCell.state(from)
 
       # Update connections
-      updated_from = %BCell{
+      updated_from = %BrainCell{
         from_cell
         | connections: [%{target_id: to, weight: 1.0, delay_ms: 100}]
       }

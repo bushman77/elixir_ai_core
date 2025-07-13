@@ -16,10 +16,10 @@ defmodule PhraseGenerator do
       nil ->
         Enum.reverse(acc)
 
-      %BCell{connections: []} ->
+      %BrainCell{connections: []} ->
         Enum.reverse([word | acc])
 
-      %BCell{connections: conns} ->
+      %BrainCell{connections: conns} ->
         # Pick the strongest connection (highest weight)
         next_word =
           conns

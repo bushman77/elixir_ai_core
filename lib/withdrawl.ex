@@ -10,7 +10,7 @@ defmodule BrainCell.Withdrawal do
   }
 
   @doc "Checks if enough time has passed to trigger withdrawal effects."
-  def check_and_apply(%BCell{} = cell, current_time) do
+  def check_and_apply(%BrainCell{} = cell, current_time) do
     case {cell.last_dose_at, cell.last_substance} do
       {nil, _} ->
         cell
@@ -30,18 +30,18 @@ defmodule BrainCell.Withdrawal do
   # default fallback
   defp withdrawal_delay(_), do: 10 * 60
 
-  defp apply_withdrawal_effect(%BCell{last_substance: nil} = cell, _substance) do
+  defp apply_withdrawal_effect(%BrainCell{last_substance: nil} = cell, _substance) do
     Logger.warning("Withdrawal attempted with no substance; skipping.")
     cell
   end
 
-  defp apply_withdrawal_effect(%BCell{} = cell, substance) do
+  defp apply_withdrawal_effect(%BrainCell{} = cell, substance) do
     deltas = Map.get(@withdrawal_effects, substance, %{dopamine: -0.2, serotonin: -0.1})
 
     new_ser = Core.clamp(cell.serotonin + deltas.serotonin, 0.0, 2.0)
     new_dop = Core.clamp(cell.dopamine + deltas.dopamine, 0.0, 2.0)
 
-    %BCell{
+    %BrainCell{
       cell
       | serotonin: new_ser,
         dopamine: new_dop,
