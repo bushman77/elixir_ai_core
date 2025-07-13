@@ -1,0 +1,273 @@
+    warning: function do_fire/5 is unused
+    │
+ 41 │   defp do_fire(%BrainCell{id: id, connections: connections}, strength, depth, visited, trail) do
+    │        ~
+    │
+    └─ lib/brainsim.ex:41:8: BrainSim (module)
+
+    warning: variable "id" is unused (if the variable is not meant to be used, prefix it with an underscore)
+    │
+ 54 │   def init(%{id: id} = args) do
+    │                  ~~
+    │
+    └─ lib/braincell.ex:54:18: BrainCell.init/1
+
+    warning: Brain.put/1 is undefined or private
+    │
+ 67 │     Brain.put(updated)
+    │           ~
+    │
+    └─ lib/braincell.ex:67:11: BrainCell.handle_cast/2
+
+    warning: Brain.put/1 is undefined or private
+    │
+ 72 │     Brain.put(state)
+    │           ~
+    │
+    └─ lib/braincell.ex:72:11: BrainCell.handle_cast/2
+
+    warning: Brain.all_ids/1 is undefined or private
+    │
+ 34 │     Brain.all_ids(Brain)
+    │           ~
+    │
+    └─ lib/elixir_ai_core/brain_output.ex:34:11: BrainOutput.top_fired_cell_id/0
+
+    warning: Brain.all_ids/1 is undefined or private
+    │
+ 46 │     Brain.all_ids(Brain)
+    │           ~
+    │
+    └─ lib/elixir_ai_core/brain_output.ex:46:11: BrainOutput.reset_activations/0
+
+    warning: Brain.get/2 is undefined or private. Did you mean:
+
+          * get/1
+
+    │
+ 48 │       case Brain.get(Brain, id) do
+    │                  ~
+    │
+    └─ lib/elixir_ai_core/brain_output.ex:48:18: BrainOutput.reset_activations/0
+
+    warning: Brain.put/1 is undefined or private
+    │
+ 50 │           Brain.put(%{cell | activation: 0.0})
+    │                 ~
+    │
+    └─ lib/elixir_ai_core/brain_output.ex:50:17: BrainOutput.reset_activations/0
+
+    warning: variable "brain_state" is unused (if the variable is not meant to be used, prefix it with an underscore)
+    │
+ 12 │   defp detect_novelty(context, brain_state) do
+    │                                ~~~~~~~~~~~
+    │
+    └─ lib/curiosity_core.ex:12:32: CuriosityCore.detect_novelty/2
+
+    warning: Brain.known_concept?/1 is undefined or private
+    │
+ 15 │       not Brain.known_concept?(token.word)
+    │                 ~
+    │
+    └─ lib/curiosity_core.ex:15:17: CuriosityCore.detect_novelty/2
+
+    warning: variable "brain" is unused (if the variable is not meant to be used, prefix it with an underscore)
+    │
+  5 │   def tag_verbs(tokens, brain) do
+    │                         ~~~~~
+    │
+    └─ lib/verb_identifier.ex:5:25: VerbIdentifier.tag_verbs/2
+
+    warning: variable "context_tokens" is unused (if the variable is not meant to be used, prefix it with an underscore)
+    │
+ 15 │   defp apply_heuristics(token, context_tokens) do
+    │                                ~~~~~~~~~~~~~~
+    │
+    └─ lib/verb_identifier.ex:15:32: VerbIdentifier.apply_heuristics/2
+
+    warning: Brain.lookup_pos/1 is undefined or private
+    │
+  8 │       case Brain.lookup_pos(token.word) do
+    │                  ~
+    │
+    └─ lib/verb_identifier.ex:8:18: VerbIdentifier.tag_verbs/2
+
+    warning: ElixirAiCore.Supervisor.start_braincell/2 is undefined or private. Did you mean:
+
+          * start_link/1
+
+    │
+ 10 │       ElixirAiCore.Supervisor.start_braincell(from, :word)
+    │                               ~
+    │
+    └─ lib/elixir_ai_core/brain_trainer.ex:10:31: ElixirAiCore.BrainTrainer.teach_chain/1
+
+    warning: ElixirAiCore.Supervisor.start_braincell/2 is undefined or private. Did you mean:
+
+          * start_link/1
+
+    │
+ 11 │       ElixirAiCore.Supervisor.start_braincell(to, :word)
+    │                               ~
+    │
+    └─ lib/elixir_ai_core/brain_trainer.ex:11:31: ElixirAiCore.BrainTrainer.teach_chain/1
+
+    warning: LLM.generate_code/1 is undefined (module LLM is not available or is yet to be defined). Make sure the module name is correct and has been specified in full (or that an alias has been defined)
+    │
+  4 │     {:ok, code} = LLM.generate_code(prompt)
+    │                       ~
+    │
+    └─ lib/self_coder.ex:4:23: SelfCoder.write_function/1
+
+    warning: UUID.uuid4/0 is undefined (module UUID is not available or is yet to be defined). Make sure the module name is correct and has been specified in full (or that an alias has been defined)
+    │
+  5 │     File.write!("lib/brain/self_learned/#{UUID.uuid4()}.ex", code)
+    │                                                ~
+    │
+    └─ lib/self_coder.ex:5:48: SelfCoder.write_function/1
+
+    warning: ElixirAiCore.Core.clamp/3 is undefined (module ElixirAiCore.Core is not available or is yet to be defined)
+    │
+ 41 │     new_ser = Core.clamp(cell.serotonin + deltas.serotonin, 0.0, 2.0)
+    │                    ~
+    │
+    └─ lib/withdrawl.ex:41:20: BrainCell.Withdrawal.apply_withdrawal_effect/2
+
+    warning: ElixirAiCore.Core.clamp/3 is undefined (module ElixirAiCore.Core is not available or is yet to be defined)
+    │
+ 42 │     new_dop = Core.clamp(cell.dopamine + deltas.dopamine, 0.0, 2.0)
+    │                    ~
+    │
+    └─ lib/withdrawl.ex:42:20: BrainCell.Withdrawal.apply_withdrawal_effect/2
+
+    warning: ElixirAiCore.Core.infer/2 is undefined (module ElixirAiCore.Core is not available or is yet to be defined)
+    │
+ 35 │     output = Core.infer(state.model, input)
+    │                   ~
+    │
+    └─ lib/elixir_ai_core/model_server.ex:35:19: ElixirAiCore.ModelServer.handle_call/3
+
+    warning: variable "type" is unused (if the variable is not meant to be used, prefix it with an underscore)
+    │
+ 17 │   def ensure_started(%{id: id, type: type} = args) do
+    │                                      ~~~~
+    │
+    └─ lib/elixir_ai_core/supervisor.ex:17:38: ElixirAiCore.Supervisor.ensure_started/1
+
+    warning: ElixirAiCore.Tokenizer.tokenize/1 is undefined (module ElixirAiCore.Tokenizer is not available or is yet to be defined)
+    │
+  6 │     |> ElixirAiCore.Tokenizer.tokenize()
+    │                               ~
+    │
+    └─ lib/elixir_ai_core/phrase_classifier.ex:6:31: ElixirAiCore.PhraseClassifier.classify/1
+
+    warning: ElixirAiCore.Schemas.BrainCell.Schema.build_id/2 is undefined (module ElixirAiCore.Schemas.BrainCell.Schema is not available or is yet to be defined)
+    │
+ 38 │         id = BrainCell.Schema.build_id(word, pos)
+    │                               ~
+    │
+    └─ lib/brain.ex:38:31: Brain.maybe_fire_cells/1
+
+    warning: Brain.get_cell/1 is undefined or private. Did you mean:
+
+          * get/1
+
+    │
+ 40 │         case Brain.get_cell(id) do
+    │                    ~
+    │
+    └─ lib/brain.ex:40:20: Brain.maybe_fire_cells/1
+
+    warning: Brain.fire_cell/1 is undefined or private
+    │
+ 42 │             Brain.fire_cell(id)
+    │                   ~
+    │
+    └─ lib/brain.ex:42:19: Brain.maybe_fire_cells/1
+
+    warning: Brain.fire_cell/1 is undefined or private
+    │
+ 46 │               Brain.fire_cell(new_cell.id)
+    │                     ~
+    │
+    └─ lib/brain.ex:46:21: Brain.maybe_fire_cells/1
+
+    warning: Brain.enrich_and_start/2 is undefined or private
+    │
+ 45 │             with {:ok, new_cell} <- Brain.enrich_and_start(word, pos) do
+    │                                           ~
+    │
+    └─ lib/brain.ex:45:43: Brain.maybe_fire_cells/1
+
+    warning: ElixirAiCore.Schemas.BrainCell.__schema__/1 is undefined (module ElixirAiCore.Schemas.BrainCell is not available or is yet to be defined)
+    │
+ 60 │         persisted = DB.all(from(b in BrainCell, where: b.word == ^word))
+    │         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/brain.ex:60: Brain.handle_call/3
+
+    warning: POSTagger.tag/1 is undefined or private. Did you mean:
+
+          * tag_word/1
+
+    │
+ 33 │     tagged = POSTagger.tag(tokens)
+    │                        ~
+    │
+    └─ lib/core.ex:33:24: Core.interpret/1
+
+     warning: Brain.put/1 is undefined or private
+     │
+ 108 │                 Brain.put(cell)
+     │                       ~
+     │
+     └─ lib/core.ex:108:23: Core.memorize/1
+
+    warning: Brain.known_word?/1 is undefined or private
+    │
+  7 │     |> Enum.filter(fn word -> not Brain.known_word?(word) end)
+    │                                         ~
+    │
+    └─ lib/lexicon_expander.ex:7:41: LexiconExpander.expand_from_entry/1
+
+    warning: Brain.known_word?/1 is undefined or private
+    │
+ 17 │     |> Enum.filter(fn w -> not Brain.known_word?(w) end)
+    │                                      ~
+    │
+    └─ lib/lexicon_expander.ex:17:38: LexiconExpander.expand_with_limit/2
+
+    warning: Brain.enrich_word/1 is undefined or private
+    │
+  8 │     |> Enum.each(fn word -> Brain.enrich_word(word) end)
+    │                                   ~
+    │
+    └─ lib/lexicon_expander.ex:8:35: LexiconExpander.expand_from_entry/1
+
+    warning: Brain.enrich_word/1 is undefined or private
+    │
+ 20 │   Enum.each(new_words, &Brain.enrich_word/1)
+    │                               ~
+    │
+    └─ lib/lexicon_expander.ex:20:31: LexiconExpander.expand_with_limit/2
+
+    warning: Core.lookup_input/1 is undefined or private
+    │
+ 15 │     case Core.lookup_input(word) do
+    │               ~
+    │
+    └─ lib/elixir_ai_core/pos_tagger.ex:15:15: POSTagger.tag_word/1
+
+🧠 AI Brain Console started. Type anything to begin.
+>     error: cannot define module Core.DBTest because it is currently being defined in test/put_and_get_test.exs:1
+    │
+  1 │ defmodule Core.DBTest do
+    │ ^^^^^^^^^^^^^^^^^^^^^^^^
+    │
+    └─ test/core/db_test.exs:1: Core.DBTest (module)
+
+
+== Compilation error in file test/core/db_test.exs ==
+** (CompileError) test/core/db_test.exs: cannot compile module Core.DBTest (errors have been logged)
+    (elixir 1.18.4) lib/kernel/parallel_compiler.ex:542: Kernel.ParallelCompiler.require_file/2
+    (elixir 1.18.4) lib/kernel/parallel_compiler.ex:425: anonymous fn/5 in Kernel.ParallelCompiler.spawn_workers/8
