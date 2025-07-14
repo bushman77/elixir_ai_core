@@ -1,4 +1,4 @@
-defmodule Tokenizer do
+defmodule Core.Tokenizer do
   @moduledoc """
   Tokenizes text into words and resolves part-of-speech (POS) tags
   using the Brain DB and online enrichment as fallback.
@@ -8,7 +8,6 @@ defmodule Tokenizer do
   alias Core.DB
   alias BrainCell
   alias LexiconEnricher
-
   @base 128
 
   @doc """
@@ -51,8 +50,12 @@ defmodule Tokenizer do
         case LexiconEnricher.enrich(word) do
           {:ok, _} ->
             case DB.all(from(b in BrainCell, where: b.word == ^word)) do
-              [] -> %{word: word, pos: [:unknown]}
-              results -> %{word: word, pos: Enum.map(results, & &1.pos)}
+              [] -> 
+                IO.puts("🚫 Word '#{word}' not found in brain. Assigning [:unknown].")
+                %{word: word, pos: [:unknown]}
+              results -> 
+                IO.puts("🧠 Found '#{word}' with POS: #{inspect(Enum.map(results, & &1.pos))}")
+                %{word: word, pos: Enum.map(results, & &1.pos)}
             end
 
           _ ->

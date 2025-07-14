@@ -7,13 +7,17 @@ defmodule ElixirAiCore.MixProject do
       version: "0.1.0",
       elixir: "~> 1.18",
       elixirc_options: [warnings_as_errors: false],
-      elixirc_paths: ["lib", "test"],
+      elixirc_paths: elixirc_paths(Mix.env()),
       config_path: "config/config.exs",
       aliases: aliases(),
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
   end
+
+defp elixirc_paths(:test), do: ["lib", "test"]
+defp elixirc_paths(_),     do: ["lib"]
+
 
   def application do
     [
@@ -38,7 +42,8 @@ defmodule ElixirAiCore.MixProject do
 
   defp aliases do
     [
-      seed: ["run priv/seed.exs"]
+setup: ["ecto.create", "ecto.migrate"],
+  test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
     ]
   end
 end

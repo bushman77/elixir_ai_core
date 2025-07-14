@@ -8,6 +8,7 @@ defmodule Core do
   alias BrainCell
   alias LexiconEnricher
   import Core.POS, only: [normalize_pos: 1]
+  alias Core.Tokenizer
 
   # --- Inference Model Interface ---
 
@@ -153,16 +154,17 @@ defmodule Core do
     if unknowns == [] do
       Core.POS.classify_input(tokens)
     else
-      results =
-        Enum.map(unknowns, fn word ->
-          with {:ok, map} <- LexiconEnricher.enrich(word),
-               {:ok, _ids} <- memorize(map) do
-            :ok
-          else
-            _ -> {:error, word}
-          end
-        end)
-
+     results =
+  Enum.map(unknowns, fn word ->
+    with {:ok, cells} <- LexiconEnricher.enrich(word),
+         {:ok, _ids} <- memorize(cells) do
+      IO.inspect(cells, label: "🧬 Enriched brain cells for #{word}")
+      :ok
+    else
+      _ -> {:error, word}
+    end
+  end)
+ 
       if Enum.any?(results, &match?({:error, _}, &1)) do
         {:error, :dictionary_missing}
       else

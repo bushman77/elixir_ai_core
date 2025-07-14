@@ -7,7 +7,7 @@ defmodule Console do
   """
 import Ecto.Query
 
-  alias Tokenizer
+  alias Core.Tokenizer
   alias Core
   alias LexiconEnricher
   alias Core.DB

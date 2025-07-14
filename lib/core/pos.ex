@@ -2,13 +2,18 @@ defmodule Core.POS do
   @moduledoc """
   Part-of-speech utilities and intent classification based on POS patterns and fallback keyword matching.
 
-  Supports intents like:
+  Supports intent categories like:
     - question
     - greeting
-    - affirmation
     - command
-    - etc.
+    - statement
+    - request
+    - negation
+    - affirmation
+    - exclamation
   """
+
+  require Logger
 
   @greeting_words ~w(hello hi hey greetings welcome)
   @affirmative_words ~w(yes yeah yup sure certainly absolutely)
@@ -74,24 +79,106 @@ defmodule Core.POS do
   }
 
   @doc """
-  Classifies a list of token maps with POS tags.
+  Classifies a list of token maps (with `:pos` lists) to determine sentence intent.
   """
   def classify_input(tokens) when is_list(tokens) do
-    pos_lists = Enum.map(tokens, fn %{pos: pos} -> pos end)
+    pos_lists = Enum.map(tokens, & &1.pos)
     combos = cartesian_product(pos_lists)
+
+    IO.inspect(tokens, label: "🔍 Tokens before classification")
+    IO.inspect(pos_lists, label: "🔠 POS Lists")
+    IO.inspect(combos, label: "🧪 All POS Combos")
 
     found_intent =
       Enum.find_value(Map.keys(@intent_patterns), :unknown, fn intent ->
         patterns = Map.get(@intent_patterns, intent, [])
+
+        IO.puts("⏳ Trying intent: #{intent}")
+        Enum.each(patterns, fn pattern ->
+          if pattern in combos, do: IO.puts("✅ Matched pattern: #{inspect(pattern)} for #{intent}")
+        end)
+
         Enum.find(patterns, fn pattern -> pattern in combos end) && intent
       end)
 
-    intent = fallback_intent(found_intent, tokens)
+    intent =
+      case found_intent do
+        :command -> if contains_interjection?(pos_lists), do: :greeting, else: :command
+        :unknown -> fallback_intent(:unknown, tokens)
+        _ -> found_intent
+      end
+
+    Logger.debug("[IntentClassifier] Chose intent: #{inspect(intent)} from tokens: #{inspect(tokens)}")
+
     {:answer, %{intent: intent, tokens: tokens}}
   end
 
-  defp fallback_intent(:unknown, tokens) do
+  @doc """
+  Classifies intent from a list of word/POS tuples (used for sentence-level analysis).
+  Also triggers firing of brain cells.
+  """
+  def intent_from_word_pos_list(pos_lists) when is_list(pos_lists) do
+    combos =
+      cartesian_product(pos_lists)
+      |> Enum.map(fn tuple_list ->
+        Enum.map(tuple_list, fn
+          {_, pos} -> pos
+          _ -> nil
+        end)
+      end)
+
+    Brain.maybe_fire_cells(pos_lists)
+
+    found_intent =
+      Enum.find_value(@intent_patterns, :unknown, fn {intent, patterns} ->
+        Enum.find(patterns, fn pattern -> pattern in combos end) && intent
+      end)
+
+    intent =
+      case found_intent do
+        :command -> if contains_interjection?(pos_lists), do: :greeting, else: :command
+        :unknown -> fallback_intent(:unknown, pos_lists)
+        _ -> found_intent
+      end
+
+    intent
+  end
+
+  defp contains_interjection?(pos_lists) do
+    Enum.any?(List.flatten(pos_lists), &(&1 == "interjection"))
+  end
+
+  @doc "Fallback classification when no intent pattern matches."
+  defp fallback_intent(:unknown, tokens) when is_list(tokens) do
     words = Enum.map(tokens, &String.downcase(&1.word))
+    pos_list = Enum.flat_map(tokens, & &1.pos)
+
+    cond do
+      Enum.any?(words, &(&1 in @greeting_words)) or
+        dominant_pos?(pos_list, "interjection") -> :greeting
+
+      Enum.any?(words, &(&1 in @affirmative_words)) -> :affirmation
+
+      true -> :unknown
+    end
+  end
+
+  defp fallback_intent(:unknown, pos_lists) when is_list(pos_lists) do
+    words = Enum.map(pos_lists, fn
+      [{word, _} | _] -> String.downcase(word)
+      {word, _} -> String.downcase(word)
+      _ -> nil
+    end)
+
+    pos_list = Enum.flat_map(pos_lists, fn
+      [{_word, pos} | _] -> [pos]
+      {_word, pos} -> [pos]
+      _ -> []
+    end)
+
+    IO.puts("🧩 Running fallback on words: #{inspect(words)}")
+    IO.puts("🔬 POS Frequency: #{inspect(Enum.frequencies(pos_list))}")
+    IO.puts("⚖️ Dominant POS check: #{inspect(dominant_pos?(pos_list, "interjection"))}")
 
     cond do
       Enum.any?(words, &(&1 in @greeting_words)) -> :greeting
@@ -102,6 +189,13 @@ defmodule Core.POS do
 
   defp fallback_intent(intent, _), do: intent
 
+  defp dominant_pos?(pos_list, target_pos, threshold \\ 0.6) do
+    freq = Enum.frequencies(pos_list)
+    total = Enum.reduce(freq, 0, fn {_k, v}, acc -> acc + v end)
+    score = Map.get(freq, target_pos, 0) / total
+    score >= threshold
+  end
+
   defp cartesian_product([]), do: [[]]
 
   defp cartesian_product([head | tail]) do
@@ -109,13 +203,13 @@ defmodule Core.POS do
   end
 
   @doc """
-  Normalizes incoming POS from API to lowercase string.
+  Normalizes incoming POS (e.g., from dictionary API).
   """
   def normalize_pos(pos) when is_binary(pos), do: String.downcase(pos)
   def normalize_pos(_), do: "unknown"
 
   @doc """
-  Picks primary POS from a list, using a preferred order (assumes strings).
+  Picks the most relevant POS from a list, using a preferred priority order.
   """
   def pick_primary_pos(pos_list) when is_list(pos_list) do
     preferred_order = [
