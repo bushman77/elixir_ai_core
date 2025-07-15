@@ -27,6 +27,8 @@ defmodule BrainCell do
 
     field :last_dose_at, :utc_datetime_usec
     field :last_substance, :string
+    field :mood, Ecto.Enum, values: [:neutral, :happy, :sad, :curious, :reflective, :nostalgic, :excited, :anxious], default: :neutral
+
     timestamps()
   end
 

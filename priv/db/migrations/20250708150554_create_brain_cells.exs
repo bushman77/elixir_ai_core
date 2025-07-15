@@ -25,7 +25,7 @@ add :position, {:array, :float}, default: [0.0, 0.0, 0.0]
       add :status, :string
       add :last_dose_at, :utc_datetime_usec
       add :last_substance, :string
-
+      add :mood, :string
       timestamps()
     end
   end

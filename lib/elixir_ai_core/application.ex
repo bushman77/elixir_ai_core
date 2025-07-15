@@ -9,7 +9,9 @@ defmodule ElixirAiCore.Application do
       {Brain, name: Brain},
       # your GenServer Console process
       Console,
-      Core.DB
+      Core.DB,
+      Core.EmotionModulator,
+      {MoodCore, []}
     ]
 
     opts = [strategy: :one_for_one, name: ElixirAiCore.TopSupervisor]

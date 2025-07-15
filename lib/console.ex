@@ -93,26 +93,40 @@ import Ecto.Query
     end
   end
 
-  defp handle_input(input) do
-    tokens = Tokenizer.tokenize(input)
-    IO.inspect(tokens, label: "🧠 Tokens")
+defp handle_input(input) do
+  tokens = Tokenizer.tokenize(input)
+  IO.inspect(tokens, label: "🧠 Tokens")
 
-    Enum.each(tokens, fn token ->
-      if token.pos == [:unknown] do
-        case DB.all(from b in BrainCell, where: b.word == ^token.word) do
-          [] -> IO.puts("⚠️ No brain cells found for #{token.word}")
-          _ -> :ok
-        end
+  Enum.each(tokens, fn token ->
+    if token.pos == [:unknown] do
+      case DB.all(from b in BrainCell, where: b.word == ^token.word) do
+        [] -> IO.puts("⚠️ No brain cells found for #{token.word}")
+        _ -> :ok
       end
-    end)
-
-    case Core.resolve_and_classify(input) do
-      {:answer, analysis} ->
-        IO.inspect(analysis, label: "🤖")
-
-      {:error, :dictionary_missing} ->
-        IO.puts("🤖: I believe I have misplaced my dictionary.")
     end
+  end)
+
+  case Core.resolve_and_classify(input) do
+    {:answer, analysis} ->
+      IO.inspect(analysis, label: "🤖")
+      response = Core.ResponsePlanner.plan(analysis)
+
+      case response do
+        {:reply, message} -> IO.puts("😄 [🧠 AI] #{message}")
+        message when is_binary(message) -> IO.puts("😄 [🧠 AI] #{message}")
+        _ -> IO.inspect(response, label: "⚠️ Unexpected response format")
+      end
+
+    {:error, :dictionary_missing} ->
+      IO.puts("🤖: I believe I have misplaced my dictionary.")
   end
 end
 
+defp mood_for_intent(:greeting), do: :happy
+  defp mood_for_intent(:farewell), do: :sad
+  defp mood_for_intent(:reflect), do: :reflective
+  defp mood_for_intent(:recall), do: :nostalgic
+  defp mood_for_intent(:define), do: :neutral
+  defp mood_for_intent(:unknown), do: :curious
+  defp mood_for_intent(_), do: :neutral
+end

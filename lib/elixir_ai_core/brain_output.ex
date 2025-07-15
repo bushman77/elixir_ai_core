@@ -1,12 +1,49 @@
 defmodule BrainOutput do
   @moduledoc """
-  Builds an output string by walking from a starting cell through its connections.
+  Handles AI output generation and external expression.
+  Supports thought tracing, phrase generation, and mood expression.
   """
 
   alias Brain
+  alias PhraseGenerator
+  alias BrainCell
+
+  # 🌟 Public API
+
+  def say(message) when is_binary(message) do
+    IO.puts("\n[🧠 AI] #{message}\n")
+    {:reply, message}
+  end
+
+  def say_with_mood(message, mood) do
+    tone =
+      case mood do
+        :happy -> "😄 "
+        :sad -> "😞 "
+        :excited -> "⚡ "
+        :reflective -> "🌀 "
+        :nostalgic -> "📸 "
+        :curious -> "🤔 "
+        _ -> ""
+      end
+
+    IO.puts("\n#{tone}[🧠 AI] #{message}\n")
+    {:reply, message}
+  end
+
+  def say_top_words(starting_id \\ nil) do
+    top_words(starting_id)
+    |> say()
+  end
+
+  def thought_trace(word, mood \\ :reflective) do
+    PhraseGenerator.generate_phrase(word, mood: mood)
+    |> say_with_mood(mood)
+  end
+
+  # 🧠 Phrase via top firing cell
 
   def top_words(starting_id \\ nil) do
-    # If no word is given, pick the highest activated cell
     start_id =
       case starting_id do
         nil -> top_fired_cell_id()
@@ -19,8 +56,9 @@ defmodule BrainOutput do
     end
   end
 
-  defp walk_chain(%{id: id, connections: []}), do: id
+  # 🔁 Walk connections recursively
 
+  defp walk_chain(%{id: id, connections: []}), do: id
   defp walk_chain(%{id: id, connections: nil}), do: id
 
   defp walk_chain(%{id: id, connections: [next | _]}) do
@@ -29,6 +67,8 @@ defmodule BrainOutput do
       next_cell -> id <> " " <> walk_chain(next_cell)
     end
   end
+
+  # 🔥 Activation Ranking
 
   def top_fired_cell_id do
     Brain.all_ids(Brain)
@@ -45,13 +85,13 @@ defmodule BrainOutput do
   def reset_activations do
     Brain.all_ids(Brain)
     |> Enum.each(fn id ->
-      case Brain.get(Brain, id) do
+      case Brain.get(id) do
         %BrainCell{} = cell ->
           Brain.put(%{cell | activation: 0.0})
 
-        _ ->
-          :ok
+        _ -> :ok
       end
     end)
   end
 end
+

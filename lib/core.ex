@@ -9,6 +9,7 @@ defmodule Core do
   alias LexiconEnricher
   import Core.POS, only: [normalize_pos: 1]
   alias Core.Tokenizer
+  alias Core.IntentMatrix
 
   # --- Inference Model Interface ---
 
@@ -141,7 +142,6 @@ defmodule Core do
   defp resolve_and_classify(input, depth) do
     tokens =
       Tokenizer.tokenize(input)
-      # keep full POS list (do NOT reduce to a single pos)
       |> Enum.map(fn %{word: word, pos: pos_list} ->
         %{word: word, pos: pos_list}
       end)
@@ -152,19 +152,25 @@ defmodule Core do
       |> Enum.map(& &1.word)
 
     if unknowns == [] do
-      Core.POS.classify_input(tokens)
+      classification = IntentMatrix.classify(tokens)
+
+      {:answer,
+       Map.merge(classification, %{
+         tokens: tokens,
+         keyword: extract_keyword(tokens)
+       })}
     else
-     results =
-  Enum.map(unknowns, fn word ->
-    with {:ok, cells} <- LexiconEnricher.enrich(word),
-         {:ok, _ids} <- memorize(cells) do
-      IO.inspect(cells, label: "🧬 Enriched brain cells for #{word}")
-      :ok
-    else
-      _ -> {:error, word}
-    end
-  end)
- 
+      results =
+        Enum.map(unknowns, fn word ->
+          with {:ok, cells} <- LexiconEnricher.enrich(word),
+               {:ok, _ids} <- memorize(cells) do
+            IO.inspect(cells, label: "🧬 Enriched brain cells for #{word}")
+            :ok
+          else
+            _ -> {:error, word}
+          end
+        end)
+
       if Enum.any?(results, &match?({:error, _}, &1)) do
         {:error, :dictionary_missing}
       else
@@ -172,6 +178,9 @@ defmodule Core do
       end
     end
   end
+
+  defp extract_keyword([%{word: word} | _]), do: word
+  defp extract_keyword(_), do: "that"
 
   @doc "Clamps a float value between min and max."
   def clamp(val), do: clamp(val, 0.0, 2.0)
