@@ -12,7 +12,8 @@ defmodule ElixirAiCore.Application do
       Core.DB,
       Core.EmotionModulator,
       {MoodCore, []},
-      {Brain.CuriosityThread, []}
+      {Brain.CuriosityThread, []},
+      Core.MemoryCore
     ]
 
     opts = [strategy: :one_for_one, name: ElixirAiCore.TopSupervisor]

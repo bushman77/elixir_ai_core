@@ -42,7 +42,7 @@ defp elixirc_paths(_),     do: ["lib"]
 
   defp aliases do
     [
-setup: ["ecto.create", "ecto.migrate"],
+setup: ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
   test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
     ]
   end

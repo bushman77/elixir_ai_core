@@ -1,22 +1,30 @@
 defmodule LexiconEnricher do
   @moduledoc """
-  Enriches a word by fetching its meanings from the internal lexicon or online dictionary,
-  building BrainCell structs, and storing them in the Brain.
+  Enriches a word by checking the internal lexicon, DB, or online dictionary (in that order).
+  Builds BrainCell structs and inserts them into the Brain.
 
-  Returns {:ok, cells} on success or {:error, reason}.
+  Only logs when the word is enriched from the API.
   """
 
   alias LexiconClient
   alias BrainCell
   alias Core.DB
 
-  @spec enrich(String.t()) :: {:ok, [BrainCell.t()]} | {:error, term()}
+  @spec enrich(String.t()) :: {:ok, [BrainCell.t()] | :already_known} | {:error, term()}
   def enrich(word) when is_binary(word) do
     word_down = String.downcase(word)
     IO.inspect(word_down, label: "LexiconEnricher.enrich called with")
 
+    # 1. Check internal lexicon
     case Map.get(@internal_lexicon, word_down) do
-      nil -> fetch_from_api(word_down)
+      nil ->
+        # 2. Check database
+        if DB.has_word?(word_down) do
+          {:ok, :already_known}
+        else
+          # 3. Fall back to external fetch
+          fetch_from_api(word_down)
+        end
 
       internal_meanings when is_list(internal_meanings) ->
         cells = build_cells(word_down, internal_meanings)
@@ -82,11 +90,9 @@ defmodule LexiconEnricher do
   end
 
   defp semantic_atoms(definition, synonyms) do
-    defn_tokens =
-      Core.Tokenizer.tokenize(definition)
-      |> Enum.map(& &1.word)
-
-    (defn_tokens ++ synonyms)
+    Core.Tokenizer.tokenize(definition)
+    |> Enum.map(& &1.word)
+    |> Kernel.++(synonyms)
     |> Enum.map(&String.downcase/1)
     |> Enum.uniq()
     |> Enum.reject(&too_short_or_common?/1)
@@ -96,35 +102,5 @@ defmodule LexiconEnricher do
     String.length(word) <= 2 or word in ~w[to and the or of a an is in on at by for with from]
   end
 
-  @internal_lexicon %{
-    # Be verbs
-    "be" => [%{"partOfSpeech" => "aux", "definitions" => [%{"definition" => "exist", "example" => "To be or not to be", "synonyms" => ["exist", "occur"], "antonyms" => []}]}],
-    "am" => [%{"partOfSpeech" => "aux", "definitions" => [%{"definition" => "first person singular present of be", "example" => "I am happy", "synonyms" => ["exist"], "antonyms" => []}]}],
-    "is" => [%{"partOfSpeech" => "aux", "definitions" => [%{"definition" => "third person singular present of be", "example" => "She is here", "synonyms" => ["exists"], "antonyms" => []}]}],
-    "are" => [%{"partOfSpeech" => "aux", "definitions" => [%{"definition" => "second person singular and plural present of be", "example" => "You are welcome", "synonyms" => ["exist"], "antonyms" => []}]}],
-    "was" => [%{"partOfSpeech" => "aux", "definitions" => [%{"definition" => "first and third person singular past of be", "example" => "He was late", "synonyms" => [], "antonyms" => []}]}],
-    "were" => [%{"partOfSpeech" => "aux", "definitions" => [%{"definition" => "second person singular and plural past of be", "example" => "They were here", "synonyms" => [], "antonyms" => []}]}],
-
-    # Have verbs
-    "have" => [%{"partOfSpeech" => "aux", "definitions" => [%{"definition" => "possess, own, or hold", "example" => "I have a book", "synonyms" => ["own", "possess"], "antonyms" => []}]}],
-    "has" => [%{"partOfSpeech" => "aux", "definitions" => [%{"definition" => "third person singular present of have", "example" => "She has a car", "synonyms" => ["owns"], "antonyms" => []}]}],
-    "had" => [%{"partOfSpeech" => "aux", "definitions" => [%{"definition" => "past tense of have", "example" => "He had a dog", "synonyms" => ["owned"], "antonyms" => []}]}],
-
-    # Do verbs
-    "do" => [%{"partOfSpeech" => "aux", "definitions" => [%{"definition" => "perform an action", "example" => "I do my homework", "synonyms" => ["perform", "execute"], "antonyms" => []}]}],
-    "does" => [%{"partOfSpeech" => "aux", "definitions" => [%{"definition" => "third person singular present of do", "example" => "She does the dishes", "synonyms" => ["performs"], "antonyms" => []}]}],
-    "did" => [%{"partOfSpeech" => "aux", "definitions" => [%{"definition" => "past tense of do", "example" => "They did the work", "synonyms" => ["performed"], "antonyms" => []}]}],
-
-    # Modal verbs
-    "can" => [%{"partOfSpeech" => "modal", "definitions" => [%{"definition" => "express ability or possibility", "example" => "I can swim", "synonyms" => ["be able to"], "antonyms" => []}]}],
-    "could" => [%{"partOfSpeech" => "modal", "definitions" => [%{"definition" => "past of can, express possibility or ability", "example" => "She could come", "synonyms" => [], "antonyms" => []}]}],
-    "may" => [%{"partOfSpeech" => "modal", "definitions" => [%{"definition" => "express possibility or permission", "example" => "You may leave", "synonyms" => [], "antonyms" => []}]}],
-    "might" => [%{"partOfSpeech" => "modal", "definitions" => [%{"definition" => "express possibility", "example" => "It might rain", "synonyms" => [], "antonyms" => []}]}],
-    "must" => [%{"partOfSpeech" => "modal", "definitions" => [%{"definition" => "express necessity or obligation", "example" => "You must stop", "synonyms" => [], "antonyms" => []}]}],
-    "shall" => [%{"partOfSpeech" => "modal", "definitions" => [%{"definition" => "express future intent or obligation", "example" => "I shall return", "synonyms" => [], "antonyms" => []}]}],
-    "should" => [%{"partOfSpeech" => "modal", "definitions" => [%{"definition" => "express advice or expectation", "example" => "You should eat", "synonyms" => [], "antonyms" => []}]}],
-    "will" => [%{"partOfSpeech" => "modal", "definitions" => [%{"definition" => "express future intent or willingness", "example" => "I will go", "synonyms" => [], "antonyms" => []}]}],
-    "would" => [%{"partOfSpeech" => "modal", "definitions" => [%{"definition" => "express conditional intent", "example" => "I would help", "synonyms" => [], "antonyms" => []}]}]
-  }
 end
 
