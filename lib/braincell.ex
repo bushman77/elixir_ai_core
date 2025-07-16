@@ -24,10 +24,12 @@ defmodule BrainCell do
     field :connections, {:array, :string}, default: []
     field :position, {:array, :float}, default: [0.0, 0.0, 0.0]
     field :status, Ecto.Enum, values: [:active, :suppressed, :overstimulated]
-
     field :last_dose_at, :utc_datetime_usec
     field :last_substance, :string
-    field :mood, Ecto.Enum, values: [:neutral, :happy, :sad, :curious, :reflective, :nostalgic, :excited, :anxious], default: :neutral
+    field :mood, Ecto.Enum,
+      values: [:neutral, :happy, :sad, :curious, :reflective, :nostalgic, :excited, :anxious],
+      default: :neutral
+field :semantic_atoms, {:array, :string}, default: []
 
     timestamps()
   end
@@ -53,23 +55,30 @@ defmodule BrainCell do
 
   # -- GenServer Callbacks
 
-  def init(%{id: id} = args) do
-    state = struct(__MODULE__, Map.merge(%{
-      position: "0.0,0.0,0.0",
-      activation: 0.0,
-      connections: [],
-      status: "active"
-    }, args))
+  @impl true
+  def init(%{id: _id} = args) do
+    cleaned =
+      args
+      |> Map.merge(%{
+        activation: 0.0,
+        connections: [],
+        position: [0.0, 0.0, 0.0],
+        status: :active
+      })
+      |> sanitize()
 
+    state = struct(__MODULE__, cleaned)
     {:ok, state}
   end
 
+  @impl true
   def handle_cast({:update_connections, new_connections}, state) do
     updated = %{state | connections: new_connections}
     Brain.put(updated)
     {:noreply, updated}
   end
 
+  @impl true
   def handle_cast({:fire, strength}, state) do
     Brain.put(state)
 
@@ -80,22 +89,20 @@ defmodule BrainCell do
     {:noreply, %{state | activation: state.activation + strength}}
   end
 
+  @impl true
   def handle_info({:register_self, registry, id, _cell}, state) do
     Registry.register(registry, id, state)
     {:noreply, state}
   end
 
+  @impl true
   def handle_call(:get_state, _from, state), do: {:reply, state, state}
 
+  @impl true
   def handle_call(:status, _from, state), do: {:reply, {:ok, state}, state}
 
   # -- Chemical simulation
-  def apply_chemical_change(
-        %__MODULE__{} = cell,
-        %{dopamine: d, serotonin: s},
-        substance \\ nil,
-        time \\ nil
-      )
+  def apply_chemical_change(%__MODULE__{} = cell, %{dopamine: d, serotonin: s}, substance \\ nil, time \\ nil)
       when is_float(d) and is_float(s) do
     new_ser = Core.clamp(cell.serotonin + s, 0.0, 2.0)
     new_dop = Core.clamp(cell.dopamine + d, 0.0, 2.0)
@@ -110,14 +117,6 @@ defmodule BrainCell do
     }
   end
 
-  def evaluate_status(serotonin, dopamine, suppression_threshold, overstim_threshold) do
-    cond do
-      serotonin <= suppression_threshold -> "suppressed"
-      dopamine > overstim_threshold -> "overstimulated"
-      true -> "active"
-    end
-  end
-
   def evaluate_status(serotonin, dopamine) do
     evaluate_status(
       serotonin,
@@ -126,5 +125,53 @@ defmodule BrainCell do
       @default_overstim_threshold
     )
   end
+
+  def evaluate_status(serotonin, dopamine, suppression_threshold, overstim_threshold) do
+    cond do
+      serotonin <= suppression_threshold -> :suppressed
+      dopamine > overstim_threshold -> :overstimulated
+      true -> :active
+    end
+  end
+
+  # -- Sanitizers
+
+  defp sanitize(attrs) do
+    attrs
+    |> Map.update(:connections, [], &ensure_list/1)
+    |> Map.update(:examples, [], &ensure_list/1)
+    |> Map.update(:synonyms, [], &ensure_list/1)
+    |> Map.update(:antonyms, [], &ensure_list/1)
+    |> Map.update(:position, [0.0, 0.0, 0.0], &ensure_floats/1)
+    |> Map.update(:status, :active, &ensure_status/1)
+  end
+
+  defp ensure_list(nil), do: []
+  defp ensure_list(list) when is_list(list), do: list
+  defp ensure_list(other) do
+    Logger.warn("[BrainCell] Expected list, got #{inspect(other)}. Coercing to [].")
+    []
+  end
+
+  defp ensure_floats(list) when is_list(list), do: Enum.map(list, &to_float/1)
+  defp ensure_floats(_), do: [0.0, 0.0, 0.0]
+
+  defp to_float(x) when is_float(x), do: x
+  defp to_float(x) when is_integer(x), do: x * 1.0
+  defp to_float(x) when is_binary(x) do
+    case Float.parse(x) do
+      {f, _} -> f
+      _ -> 0.0
+    end
+  end
+  defp to_float(_), do: 0.0
+
+  defp ensure_status(val) when is_atom(val), do: val
+  defp ensure_status(val) when is_binary(val) do
+    String.to_existing_atom(val)
+  rescue
+    _ -> :active
+  end
+  defp ensure_status(_), do: :active
 end
 

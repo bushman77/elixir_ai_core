@@ -60,9 +60,7 @@ defmodule Brain do
 
             :not_found ->
               case enrich_and_start(word, pos) do
-                {:ok, new_cell} ->
-                  fire_cell(new_cell.id)
-
+                {:ok, new_cell} -> fire_cell(new_cell.id)
                 {:error, reason} ->
                   Logger.warn("[Brain] Failed to enrich and start cell for #{word} (#{pos}): #{inspect(reason)}")
               end
@@ -73,14 +71,65 @@ defmodule Brain do
     end)
   end
 
+  @doc """
+  Begins semantic meaning propagation from the given {word, pos} pair.
+  Default depth: 2, strength: 1.0
+  """
+  def propagate_meaning(pair), do: propagate_meaning(pair, 2, 1.0)
+
+  def propagate_meaning(_pair, 0, _strength), do: :ok
+
+  def propagate_meaning({word, pos}, depth, strength) do
+    id = BrainCell.build_id(word, pos)
+
+    case get_cell(id) do
+      {:ok, pid} ->
+        Logger.info("[🔥] Propagating from #{word} (#{pos}) at depth #{depth}, strength #{strength}")
+        GenServer.cast(pid, {:fire, strength})
+
+        case GenServer.call(pid, :get_state) do
+          %BrainCell{semantic_atoms: atoms} when is_list(atoms) and length(atoms) > 0 ->
+            Enum.each(atoms, fn atom ->
+              Enum.each(possible_pos(atom), fn inferred_pos ->
+                unless known_cell?({atom, inferred_pos}) do
+                  Logger.debug("[Brain] Enriching semantic atom: #{atom} (#{inferred_pos})")
+                  enrich_and_start(atom, inferred_pos)
+                end
+
+                propagate_meaning({atom, inferred_pos}, depth - 1, strength * 0.8)
+              end)
+            end)
+
+          %BrainCell{definition: defn} when is_binary(defn) ->
+            Logger.warn("[Brain] Fallback: Tokenizing definition for #{word} (#{pos})")
+            tokens = Core.Tokenizer.tokenize(defn)
+
+            Enum.each(tokens, fn %{word: w, pos: p_list} ->
+              Enum.each(p_list, fn p ->
+                unless known_cell?({w, p}) do
+                  Logger.debug("[Brain] Enriching from defn: #{w} (#{p})")
+                  enrich_and_start(w, p)
+                end
+
+                propagate_meaning({w, p}, depth - 1, strength * 0.8)
+              end)
+            end)
+
+          _ ->
+            Logger.warning("[Brain] No semantic_atoms or usable definition for #{word} (#{pos})")
+        end
+
+      :not_found ->
+        Logger.warning("[Brain] Cannot propagate from unfired cell: #{id}")
+    end
+  end
+
   # ────────────────────────
   # GenServer Callbacks
   # ────────────────────────
 
   @impl true
-  def init(_opts) do
-    {:ok, []}
-  end
+  def init(_opts), do: {:ok, []}
 
   @impl true
   def handle_call({:get, word}, _from, state) do
@@ -101,7 +150,7 @@ defmodule Brain do
                   Enum.map(enriched_cells, fn cell ->
                     case BrainRegistry.register(cell) do
                       {:ok, pid} -> safe_status(pid)
-                      err -> 
+                      err ->
                         Logger.error("[Brain] Register failed: #{inspect(err)}")
                         {:error, err}
                     end
@@ -121,7 +170,7 @@ defmodule Brain do
               Enum.map(persisted_cells, fn cell ->
                 case BrainRegistry.register(cell) do
                   {:ok, pid} -> safe_status(pid)
-                  err -> 
+                  err ->
                     Logger.error("[Brain] Register failed: #{inspect(err)}")
                     {:error, err}
                 end
@@ -184,7 +233,7 @@ defmodule Brain do
       DB.insert!(cell)
 
       case BrainRegistry.register(cell) do
-        {:ok, pid} -> {:ok, cell}
+        {:ok, _pid} -> {:ok, cell}
         err ->
           Logger.error("[Brain] Failed to register cell: #{inspect(err)}")
           {:error, err}
@@ -195,5 +244,16 @@ defmodule Brain do
         {:error, :no_matching_cell_found}
     end
   end
+
+  defp known_cell?({word, pos}) do
+    id = BrainCell.build_id(word, pos)
+
+    case get_cell(id) do
+      {:ok, _} -> true
+      :not_found -> DB.exists?(id)
+    end
+  end
+
+  defp possible_pos(_word), do: ["noun", "verb", "adjective"]
 end
 
