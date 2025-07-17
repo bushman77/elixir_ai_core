@@ -93,6 +93,19 @@ import Ecto.Query
     end
   end
 
+defp handle_input("eval " <> code) do
+  try do
+    result = Code.eval_string(code)
+    IO.inspect(result, label: "🧪 Eval Result")
+  rescue
+    error -> IO.puts("❌ Eval Error: #{inspect(error)}")
+  end
+
+  :ok
+end
+
+
+
 defp handle_input(input) do
   tokens = Tokenizer.tokenize(input)
   IO.inspect(tokens, label: "🧠 Tokens")
@@ -106,6 +119,16 @@ defp handle_input(input) do
     end
   end)
 
+  # 🔁 RECALL: Check last memory
+  case Core.MemoryCore.recent(1) do
+    [%{intent: :question, text: last}] ->
+      IO.puts("🤔 You previously asked: #{last}. Want to follow up?")
+
+    _ ->
+      :ok
+  end
+
+  # 🧠 Reason and respond
   case Core.resolve_and_classify(input) do
     {:answer, analysis} ->
       IO.inspect(analysis, label: "🤖")

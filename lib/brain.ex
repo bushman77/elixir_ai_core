@@ -255,5 +255,13 @@ defmodule Brain do
   end
 
   defp possible_pos(_word), do: ["noun", "verb", "adjective"]
+
+@doc """
+  Returns a list of all currently active neuron IDs (i.e., brain cells registered in the Registry).
+  """
+  def active_neurons do
+    Registry.select(BrainCell.Registry, [{{:"$1", :_, :_}, [], [:"$1"]}])
+  end
+
 end
 

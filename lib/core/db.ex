@@ -3,11 +3,31 @@ defmodule Core.DB do
     otp_app: :elixir_ai_core,
     adapter: Ecto.Adapters.Postgres
 
-def cell_exists?(id) do
   import Ecto.Query
-  from(b in BrainCell, where: b.id == ^id, select: 1)
-  |> ElixirAiCore.Repo.exists?()
-end
+  alias BrainCell
 
+  @doc """
+  Checks if any brain cell exists for the given word.
+  """
+  def has_word?(word) when is_binary(word) do
+    query =
+      from b in BrainCell,
+        where: b.word == ^word,
+        select: 1
+
+    exists?(query)
+  end
+
+  @doc """
+  Checks if a brain cell exists for the given id.
+  """
+  def cell_exists?(id) do
+    query =
+      from b in BrainCell,
+        where: b.id == ^id,
+        select: 1
+
+    exists?(query)
+  end
 end
 

@@ -1,9 +1,8 @@
 defmodule LexiconEnricher do
   @moduledoc """
-  Enriches a word by checking the internal lexicon, DB, or online dictionary (in that order).
+  Enriches a word by checking the database first, then fetching from the online dictionary if not found.
   Builds BrainCell structs and inserts them into the Brain.
-
-  Only logs when the word is enriched from the API.
+  Logs only when enrichment occurs via the API.
   """
 
   alias LexiconClient
@@ -15,21 +14,12 @@ defmodule LexiconEnricher do
     word_down = String.downcase(word)
     IO.inspect(word_down, label: "LexiconEnricher.enrich called with")
 
-    # 1. Check internal lexicon
-    case Map.get(@internal_lexicon, word_down) do
-      nil ->
-        # 2. Check database
-        if DB.has_word?(word_down) do
-          {:ok, :already_known}
-        else
-          # 3. Fall back to external fetch
-          fetch_from_api(word_down)
-        end
-
-      internal_meanings when is_list(internal_meanings) ->
-        cells = build_cells(word_down, internal_meanings)
-        Enum.each(cells, &insert_cell/1)
-        {:ok, cells}
+    # 1. Check database
+    if DB.has_word?(word_down) do
+      {:ok, :already_known}
+    else
+      # 2. Fallback to external fetch
+      fetch_from_api(word_down)
     end
   end
 
@@ -89,18 +79,15 @@ defmodule LexiconEnricher do
     end)
   end
 
-  defp semantic_atoms(definition, synonyms) do
-    Core.Tokenizer.tokenize(definition)
-    |> Enum.map(& &1.word)
-    |> Kernel.++(synonyms)
-    |> Enum.map(&String.downcase/1)
-    |> Enum.uniq()
-    |> Enum.reject(&too_short_or_common?/1)
-  end
+defp semantic_atoms(_definition, synonyms) do
+  synonyms
+  |> Enum.map(&String.downcase/1)
+  |> Enum.uniq()
+  |> Enum.reject(&too_short_or_common?/1)
+end
 
   defp too_short_or_common?(word) do
     String.length(word) <= 2 or word in ~w[to and the or of a an is in on at by for with from]
   end
-
 end
 
