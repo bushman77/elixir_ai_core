@@ -132,69 +132,70 @@ defmodule Brain do
   def init(_opts), do: {:ok, []}
 
   @impl true
-  def handle_call({:get, word}, _from, state) do
-    case BrainRegistry.query(word) do
-      [] ->
-        persisted = DB.all(from(b in BrainCell, where: b.word == ^word))
+def handle_call({:get, word}, _from, state) do
+  case BrainRegistry.query(word) do
+    [] ->
+      case DB.all(from(b in BrainCell, where: b.word == ^word)) do
+        [] ->
+          case LexiconEnricher.enrich(word) do
+            {:ok, []} ->
+              {:reply, {:error, :no_definitions_found}, state}
 
-        case persisted do
-          [] ->
-            case LexiconEnricher.enrich(word) do
-              {:ok, []} ->
-                {:reply, {:error, :no_definitions_found}, state}
+            {:ok, %BrainCell{} = single_cell} ->
+              handle_new_cells([single_cell], state)
 
-              {:ok, enriched_cells} when is_list(enriched_cells) ->
-                DB.insert_all(BrainCell, Enum.map(enriched_cells, &Map.from_struct/1))
+            {:ok, enriched_cells} when is_list(enriched_cells) ->
+              handle_new_cells(enriched_cells, state)
 
-                statuses =
-                  Enum.map(enriched_cells, fn cell ->
-                    case BrainRegistry.register(cell) do
-                      {:ok, pid} -> safe_status(pid)
-                      err ->
-                        Logger.error("[Brain] Register failed: #{inspect(err)}")
-                        {:error, err}
-                    end
-                  end)
+            {:error, reason} ->
+              {:reply, {:error, {:enrich_failed, reason}}, state}
 
-                {:reply, statuses, state}
+            other ->
+              {:reply, {:error, {:unexpected_return, other}}, state}
+          end
 
-              {:error, reason} ->
-                {:reply, {:error, {:enrich_failed, reason}}, state}
+        persisted_cells ->
+          statuses = register_and_get_statuses(persisted_cells)
+          {:reply, statuses, state}
+      end
 
-              other ->
-                {:reply, {:error, {:unexpected_return, other}}, state}
-            end
+    active_cells ->
+      statuses =
+        Enum.map(active_cells, fn {_id, pid, _cell} ->
+          case safe_status(pid) do
+            {:ok, status} -> status
+            {:error, reason} -> {:error, reason}
+          end
+        end)
 
-          persisted_cells ->
-            statuses =
-              Enum.map(persisted_cells, fn cell ->
-                case BrainRegistry.register(cell) do
-                  {:ok, pid} -> safe_status(pid)
-                  err ->
-                    Logger.error("[Brain] Register failed: #{inspect(err)}")
-                    {:error, err}
-                end
-              end)
-
-            {:reply, statuses, state}
-        end
-
-      active_cells ->
-        statuses =
-          Enum.map(active_cells, fn {_id, pid, _cell} ->
-            case safe_status(pid) do
-              {:ok, status} -> status
-              {:error, reason} -> {:error, reason}
-            end
-          end)
-
-        {:reply, statuses, state}
-    end
+      {:reply, statuses, state}
   end
+end
 
   # ────────────────────────
   # Helpers
   # ────────────────────────
+defp handle_new_cells(cells, state) do
+  DB.insert_all(BrainCell, Enum.map(cells, &Map.from_struct/1))
+
+  Enum.each(cells, fn cell ->
+    MoodCore.register_activation(cell)
+  end)
+
+  statuses = register_and_get_statuses(cells)
+  {:reply, statuses, state}
+end
+
+defp register_and_get_statuses(cells) do
+  Enum.map(cells, fn cell ->
+    case BrainRegistry.register(cell) do
+      {:ok, pid} -> safe_status(pid)
+      err ->
+        Logger.error("[Brain] Register failed: #{inspect(err)}")
+        {:error, err}
+    end
+  end)
+end
 
   defp safe_status(pid) do
     if Process.alive?(pid) do

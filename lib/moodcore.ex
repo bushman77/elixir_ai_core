@@ -88,5 +88,12 @@ defmodule MoodCore do
   defp schedule_decay, do: Process.send_after(self(), :decay, @decay_interval)
 
   defp now, do: DateTime.utc_now()
+
+@spec register_activation(BrainCell.t()) :: :ok
+def register_activation(%BrainCell{dopamine: d, serotonin: s}) do
+  # Adjust internal state based on neurotransmitter inputs
+  GenServer.cast(__MODULE__, {:register_activation, d, s})
+end
+
 end
 

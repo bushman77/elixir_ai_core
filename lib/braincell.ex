@@ -49,6 +49,16 @@ field :semantic_atoms, {:array, :string}, default: []
 
   def via(id), do: {:via, Registry, {BrainCell.Registry, id}}
 
+def start_if_needed(%{id: id} = cell) do
+  case Registry.lookup(BrainCell.Registry, id) do
+    [] ->
+      BrainCell.start_link(cell)
+    _ ->
+      :ok
+  end
+end
+
+
   def fire(id, strength), do: GenServer.cast(via(id), {:fire, strength})
 
   def state(id), do: GenServer.call(via(id), :get_state)
