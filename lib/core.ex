@@ -140,24 +140,20 @@ defmodule Core do
   defp resolve_and_classify(_input, 5), do: {:error, :dictionary_missing}
 
   defp resolve_and_classify(input, depth) do
-    tokens =
-      Tokenizer.tokenize(input)
-      |> Enum.map(fn %{word: word, pos: pos_list} ->
-        %{word: word, pos: pos_list}
-      end)
+tokens = Tokenizer.tokenize(input)
 
-    unknowns =
-      tokens
-      |> Enum.filter(fn %{pos: pos_list} -> Enum.member?(pos_list, :unknown) end)
-      |> Enum.map(& &1.word)
+  unknowns =
+    tokens
+    |> Enum.filter(fn %{pos: pos_list} -> Enum.member?(pos_list, :unknown) end)
+    |> Enum.map(& &1.word)
 
-    if unknowns == [] do
-      classification = IntentMatrix.classify(tokens)
-
+  if unknowns == [] do
+    merged_tokens = Core.MultiwordMatcher.merge_multiwords(tokens)
+    classification = IntentMatrix.classify(merged_tokens)
       {:answer,
        Map.merge(classification, %{
          tokens: tokens,
-         keyword: extract_keyword(tokens)
+         keyword: extract_keyword(merged_tokens)
        })}
     else
       results =

@@ -8,23 +8,12 @@ defmodule Brain do
   alias BrainCell
   alias LexiconEnricher
 
-  # ────────────────────────
-  # Public API
-  # ────────────────────────
-
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, [], Keyword.put_new(opts, :name, __MODULE__))
   end
 
-  @doc """
-  Retrieves all brain cells associated with the given word.
-  Follows 3-tier lookup: Registry -> Ecto DB -> LexiconEnricher.
-  """
   def get(word), do: GenServer.call(__MODULE__, {:get, word})
 
-  @doc """
-  Activates brain cells relevant to the given intent and tokens.
-  """
   def activate_for_intent_and_tokens(intent, tokens) do
     intent_keywords = intent_keywords(intent)
 
@@ -42,16 +31,11 @@ defmodule Brain do
   defp intent_keywords(:command), do: ["run", "start", "execute"]
   defp intent_keywords(_), do: []
 
-  @doc """
-  Iterates over lists of {word, pos} tuples and fires corresponding brain cells.
-  If a cell doesn't exist, it enriches and starts it.
-  """
   def maybe_fire_cells(pos_lists) do
     Enum.each(pos_lists, fn word_pos_list ->
       Enum.each(word_pos_list, fn
         {word, pos} ->
           Logger.debug("[Brain] Activating cell for #{word} (#{pos})")
-
           id = BrainCell.build_id(word, pos)
 
           case get_cell(id) do
@@ -62,7 +46,7 @@ defmodule Brain do
               case enrich_and_start(word, pos) do
                 {:ok, new_cell} -> fire_cell(new_cell.id)
                 {:error, reason} ->
-                  Logger.warn("[Brain] Failed to enrich and start cell for #{word} (#{pos}): #{inspect(reason)}")
+                  Logger.warn("[Brain] Failed to enrich/start cell: #{inspect(reason)}")
               end
           end
 
@@ -71,12 +55,7 @@ defmodule Brain do
     end)
   end
 
-  @doc """
-  Begins semantic meaning propagation from the given {word, pos} pair.
-  Default depth: 2, strength: 1.0
-  """
   def propagate_meaning(pair), do: propagate_meaning(pair, 2, 1.0)
-
   def propagate_meaning(_pair, 0, _strength), do: :ok
 
   def propagate_meaning({word, pos}, depth, strength) do
@@ -84,7 +63,8 @@ defmodule Brain do
 
     case get_cell(id) do
       {:ok, pid} ->
-        Logger.info("[🔥] Propagating from #{word} (#{pos}) at depth #{depth}, strength #{strength}")
+Logger.info("[🔥] Propagating from #{word} (#{pos}) depth #{depth}, strength #{strength}")
+
         GenServer.cast(pid, {:fire, strength})
 
         case GenServer.call(pid, :get_state) do
@@ -124,78 +104,56 @@ defmodule Brain do
     end
   end
 
-  # ────────────────────────
-  # GenServer Callbacks
-  # ────────────────────────
-
   @impl true
   def init(_opts), do: {:ok, []}
 
   @impl true
-def handle_call({:get, word}, _from, state) do
-  case BrainRegistry.query(word) do
-    [] ->
-      case DB.all(from(b in BrainCell, where: b.word == ^word)) do
-        [] ->
-          case LexiconEnricher.enrich(word) do
-            {:ok, []} ->
-              {:reply, {:error, :no_definitions_found}, state}
+  def handle_call({:get, word}, _from, state) do
+    case BrainRegistry.query(word) do
+      [] ->
+        case DB.all(from(b in BrainCell, where: b.word == ^word)) do
+          [] ->
+            case LexiconEnricher.enrich(word) do
+              {:ok, []} -> {:reply, {:error, :no_definitions_found}, state}
+              {:ok, %BrainCell{} = c} -> handle_new_cells([c], state)
+              {:ok, cells} when is_list(cells) -> handle_new_cells(cells, state)
+              {:error, reason} -> {:reply, {:error, {:enrich_failed, reason}}, state}
+              other -> {:reply, {:error, {:unexpected_return, other}}, state}
+            end
 
-            {:ok, %BrainCell{} = single_cell} ->
-              handle_new_cells([single_cell], state)
+          persisted ->
+            {:reply, register_and_get_statuses(persisted), state}
+        end
 
-            {:ok, enriched_cells} when is_list(enriched_cells) ->
-              handle_new_cells(enriched_cells, state)
+      active ->
+        statuses =
+          Enum.map(active, fn {_id, pid, _cell} ->
+            case safe_status(pid) do
+              {:ok, status} -> status
+              {:error, reason} -> {:error, reason}
+            end
+          end)
 
-            {:error, reason} ->
-              {:reply, {:error, {:enrich_failed, reason}}, state}
-
-            other ->
-              {:reply, {:error, {:unexpected_return, other}}, state}
-          end
-
-        persisted_cells ->
-          statuses = register_and_get_statuses(persisted_cells)
-          {:reply, statuses, state}
-      end
-
-    active_cells ->
-      statuses =
-        Enum.map(active_cells, fn {_id, pid, _cell} ->
-          case safe_status(pid) do
-            {:ok, status} -> status
-            {:error, reason} -> {:error, reason}
-          end
-        end)
-
-      {:reply, statuses, state}
-  end
-end
-
-  # ────────────────────────
-  # Helpers
-  # ────────────────────────
-defp handle_new_cells(cells, state) do
-  DB.insert_all(BrainCell, Enum.map(cells, &Map.from_struct/1))
-
-  Enum.each(cells, fn cell ->
-    MoodCore.register_activation(cell)
-  end)
-
-  statuses = register_and_get_statuses(cells)
-  {:reply, statuses, state}
-end
-
-defp register_and_get_statuses(cells) do
-  Enum.map(cells, fn cell ->
-    case BrainRegistry.register(cell) do
-      {:ok, pid} -> safe_status(pid)
-      err ->
-        Logger.error("[Brain] Register failed: #{inspect(err)}")
-        {:error, err}
+        {:reply, statuses, state}
     end
-  end)
-end
+  end
+
+  defp handle_new_cells(cells, state) do
+    DB.insert_all(BrainCell, Enum.map(cells, &Map.from_struct/1))
+    Enum.each(cells, &MoodCore.register_activation/1)
+    {:reply, register_and_get_statuses(cells), state}
+  end
+
+  defp register_and_get_statuses(cells) do
+    Enum.map(cells, fn cell ->
+      case BrainRegistry.register(cell) do
+        {:ok, pid} -> safe_status(pid)
+        err ->
+          Logger.error("[Brain] Register failed: #{inspect(err)}")
+          {:error, err}
+      end
+    end)
+  end
 
   defp safe_status(pid) do
     if Process.alive?(pid) do
@@ -257,12 +215,8 @@ end
 
   defp possible_pos(_word), do: ["noun", "verb", "adjective"]
 
-@doc """
-  Returns a list of all currently active neuron IDs (i.e., brain cells registered in the Registry).
-  """
   def active_neurons do
     Registry.select(BrainCell.Registry, [{{:"$1", :_, :_}, [], [:"$1"]}])
   end
-
 end
 

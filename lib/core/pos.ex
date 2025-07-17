@@ -78,6 +78,34 @@ defmodule Core.POS do
     ]
   }
 
+@multiword_dict %{
+  {"take", "care"} => %{word: "take care", pos: ["verb"]},
+  {"look", "after"} => %{word: "look after", pos: ["verb"]},
+  {"give", "up"} => %{word: "give up", pos: ["verb"]},
+  {"kick", "the bucket"} => %{word: "kick the bucket", pos: ["verb", "idiom"]}
+  # Add more as needed
+}
+
+def merge_multiword_phrases(tokens) do
+  do_merge(tokens, [])
+end
+
+defp do_merge([t1, t2 | rest], acc) do
+  key = {t1.word, t2.word}
+
+  case @multiword_dict[key] do
+    nil ->
+      do_merge([t2 | rest], [t1 | acc])
+
+    merged ->
+      do_merge(rest, [merged | acc])
+  end
+end
+
+defp do_merge([t], acc), do: Enum.reverse([t | acc])
+defp do_merge([], acc), do: Enum.reverse(acc)
+
+
   @doc """
   Classifies a list of token maps (with `:pos` lists) to determine sentence intent.
   """
