@@ -1,11 +1,13 @@
 defmodule Console do
   use GenServer
+
   @moduledoc """
   Interactive console for AI Brain.
   Type any sentence and the system will tokenize it, enrich unknown words,
   register brain cells, and show analysis.
   """
-import Ecto.Query
+
+  import Ecto.Query
 
   alias Core.Tokenizer
   alias Core
@@ -70,82 +72,78 @@ import Ecto.Query
       :ok ->
         entries = DB.all(from b in BrainCell, where: b.word == ^word)
 
-        case entries do
-          [] ->
-            IO.puts("⚠️  No brain cells found for '#{word}' after enrichment.")
+        if entries == [] do
+          IO.puts("⚠️ No brain cells found for '#{word}' after enrichment.")
+        else
+          IO.puts("✅ Enriched '#{word}' with:")
+          Enum.each(entries, fn
+            %BrainCell{pos: pos, definition: defn} ->
+              IO.puts(" • [#{pos}] #{defn}")
 
-          _ ->
-            IO.puts("✅ Enriched '#{word}' with:")
-            Enum.each(entries, fn
-              %BrainCell{pos: pos, definition: defn} ->
-                IO.puts(" • [#{pos}] #{defn}")
-
-              other ->
-                IO.puts("⚠️ Unexpected DB entry: #{inspect(other)}")
-            end)
+            other ->
+              IO.puts("⚠️ Unexpected DB entry: #{inspect(other)}")
+          end)
         end
 
       {:error, :not_found} ->
         IO.puts("❌ Word '#{word}' not found in online dictionary.")
 
       {:error, reason} ->
-        IO.puts("⚠️  Enrichment failed: #{inspect(reason)}")
+        IO.puts("⚠️ Enrichment failed: #{inspect(reason)}")
     end
   end
 
-defp handle_input("eval " <> code) do
-  try do
-    result = Code.eval_string(code)
-    IO.inspect(result, label: "🧪 Eval Result")
-  rescue
-    error -> IO.puts("❌ Eval Error: #{inspect(error)}")
-  end
-
-  :ok
-end
-
-
-
-defp handle_input(input) do
-  tokens = Tokenizer.tokenize(input)
-  IO.inspect(tokens, label: "🧠 Tokens")
-
-  Enum.each(tokens, fn token ->
-    if token.pos == [:unknown] do
-      case DB.all(from b in BrainCell, where: b.word == ^token.word) do
-        [] -> IO.puts("⚠️ No brain cells found for #{token.word}")
-        _ -> :ok
-      end
+  defp handle_input("eval " <> code) do
+    try do
+      {result, _binding} = Code.eval_string(code)
+      IO.inspect(result, label: "🧪 Eval Result")
+    rescue
+      error -> IO.puts("❌ Eval Error: #{inspect(error)}")
     end
-  end)
 
-  # 🔁 RECALL: Check last memory
-  case Core.MemoryCore.recent(1) do
-    [%{intent: :question, text: last}] ->
-      IO.puts("🤔 You previously asked: #{last}. Want to follow up?")
-
-    _ ->
-      :ok
+    :ok
   end
 
-  # 🧠 Reason and respond
-  case Core.resolve_and_classify(input) do
-    {:answer, analysis} ->
-      IO.inspect(analysis, label: "🤖")
-      response = Core.ResponsePlanner.plan(analysis)
+  defp handle_input(input) do
+    tokens = Tokenizer.tokenize(input)
+    IO.inspect(tokens, label: "🧠 Tokens")
 
-      case response do
-        {:reply, message} -> IO.puts("😄 [🧠 AI] #{message}")
-        message when is_binary(message) -> IO.puts("😄 [🧠 AI] #{message}")
-        _ -> IO.inspect(response, label: "⚠️ Unexpected response format")
+    Enum.each(tokens, fn token ->
+      if token.pos == [:unknown] do
+        case DB.all(from b in BrainCell, where: b.word == ^token.word) do
+          [] -> IO.puts("⚠️ No brain cells found for #{token.word}")
+          _ -> :ok
+        end
       end
+    end)
 
-    {:error, :dictionary_missing} ->
-      IO.puts("🤖: I believe I have misplaced my dictionary.")
+    # 🔁 RECALL: Check last memory
+    case Core.MemoryCore.recent(1) do
+      [%{intent: :question, text: last}] ->
+        IO.puts("🤔 You previously asked: #{last}. Want to follow up?")
+
+      _ ->
+        :ok
+    end
+
+    # 🧠 Reason and respond
+    case Core.resolve_and_classify(input) do
+      {:answer, analysis} ->
+        IO.inspect(analysis, label: "🤖")
+
+        case Core.ResponsePlanner.plan(analysis) do
+          {:reply, message} -> IO.puts("😄 [🧠 AI] #{message}")
+          message when is_binary(message) -> IO.puts("😄 [🧠 AI] #{message}")
+          other -> IO.inspect(other, label: "⚠️ Unexpected response format")
+        end
+
+      {:error, :dictionary_missing} ->
+        IO.puts("🤖: I believe I have misplaced my dictionary.")
+    end
   end
-end
 
-defp mood_for_intent(:greeting), do: :happy
+  # Optional mood mapping for intents
+  defp mood_for_intent(:greeting), do: :happy
   defp mood_for_intent(:farewell), do: :sad
   defp mood_for_intent(:reflect), do: :reflective
   defp mood_for_intent(:recall), do: :nostalgic
@@ -153,3 +151,4 @@ defp mood_for_intent(:greeting), do: :happy
   defp mood_for_intent(:unknown), do: :curious
   defp mood_for_intent(_), do: :neutral
 end
+

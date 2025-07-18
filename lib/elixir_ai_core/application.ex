@@ -5,18 +5,17 @@ defmodule ElixirAiCore.Application do
     children = [
       {Registry, keys: :unique, name: BrainCell.Registry},
       {DynamicSupervisor, strategy: :one_for_one, name: BrainCellSupervisor},
-      ElixirAiCore.Supervisor,
+      {ElixirAiCore.Supervisor, []}, # Assuming this is a custom supervisor
       {Brain, name: Brain},
-      Console,
-      Core.DB,
-      Core.EmotionModulator,
+      {Console, []}, # Assuming Console is a valid process module
+      {Core.DB, []}, # Assuming Core.DB is a valid process module
+      {Core.EmotionModulator, []}, # Assuming Core.EmotionModulator is a valid process module
       {MoodCore, []},
       {Brain.CuriosityThread, []},
-      Core.MemoryCore
+      {Core.MemoryCore, []} # Assuming Core.MemoryCore is a valid process module
     ]
 
     opts = [strategy: :one_for_one, name: ElixirAiCore.TopSupervisor]
     Supervisor.start_link(children, opts)
   end
 end
-

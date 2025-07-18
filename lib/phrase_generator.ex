@@ -1,7 +1,7 @@
 defmodule PhraseGenerator do
   @moduledoc """
-  Generates a phrase starting from a word by walking brain cell connections.
-  Traversal is influenced by connection weight, mood, and dopamine levels.
+  Generates a phrase by traversing BrainCell connections from a start word.
+  Mood, dopamine, and connection weight influence selection.
   """
 
   alias Brain
@@ -16,11 +16,13 @@ defmodule PhraseGenerator do
 
   @doc """
   Generates a phrase from a start word.
-  Optionally accepts `mood`; if not provided, uses current mood.
+  Accepts optional `mood`; defaults to current mood from MoodCore.
   """
   def generate_phrase(start_word, opts \\ []) do
     mood = Keyword.get(opts, :mood, MoodCore.current_mood())
-    do_generate(start_word, @max_length, [], mood)
+
+    start_word
+    |> do_generate(@max_length, [], mood)
     |> Enum.reverse()
     |> Enum.join(" ")
   end
@@ -29,27 +31,32 @@ defmodule PhraseGenerator do
 
   defp do_generate(word, length, acc, mood) do
     case Brain.get(word) do
-      nil ->
-        acc
+      %BrainCell{connections: [], word: actual_word} ->
+        [actual_word | acc]
 
-      %BrainCell{connections: []} ->
-        [word | acc]
-
-      %BrainCell{connections: conns, dopamine: dopa} ->
+      %BrainCell{connections: conns, dopamine: dopa, word: actual_word} ->
         next_word =
           conns
           |> mood_adjusted_sort(dopa, mood)
           |> List.first()
-          |> Map.get(:target_id)
+          |> then(& &1 && &1.target_id)
 
-        do_generate(next_word, length - 1, [word | acc], mood)
+        if next_word do
+          do_generate(next_word, length - 1, [actual_word | acc], mood)
+        else
+          [actual_word | acc]
+        end
+
+      _ ->
+        acc
     end
   end
 
   defp mood_adjusted_sort(conns, dopa, mood) do
+    dopa = dopa || 1.0
+
     Enum.sort_by(conns, fn conn ->
       weight = conn.weight || 1.0
-      dopa = dopa || 1.0
 
       mood_factor =
         case mood do
@@ -61,8 +68,8 @@ defmodule PhraseGenerator do
           _ -> 1.0
         end
 
-      adjusted = weight * dopa * mood_factor
-      -adjusted
+      # Higher score = more likely to be first
+      -1.0 * weight * dopa * mood_factor
     end)
   end
 end

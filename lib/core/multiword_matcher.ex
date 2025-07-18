@@ -1,34 +1,17 @@
 defmodule Core.MultiwordMatcher do
   alias Core.MultiwordPOS
 
-  def merge_multiwords(tokens) do
-    words = Enum.map(tokens, & &1.word)
-    merge_recursive(words, 0, [], words)
-  end
+  def extract_head_tail(input) when is_binary(input) do
+    phrase = Enum.find(MultiwordPOS.phrases(), fn p -> String.contains?(input, p) end)
 
-  defp merge_recursive(words, index, acc, all_words) when index >= length(all_words), do: Enum.reverse(acc)
-
-  defp merge_recursive(words, index, acc, all_words) do
-    word = Enum.at(all_words, index)
-
-    matches =
-      MultiwordPOS.phrases()
-      |> Enum.filter(fn phrase -> String.starts_with?(phrase, word) end)
-
-    found =
-      Enum.find(matches, fn phrase ->
-        phrase_words = String.split(phrase, " ")
-        slice = Enum.slice(all_words, index, length(phrase_words))
-        slice == phrase_words
-      end)
-
-    if found do
-      type = MultiwordPOS.lookup(found)
-      token = %{word: found, pos: [type]}
-      skip = length(String.split(found, " ")) - 1
-      merge_recursive(words, index + skip + 1, [token | acc], all_words)
+    if phrase do
+      [head, tail] = String.split(input, phrase, parts: 2, trim: true)
+      head_tokens = if String.trim(head) != "", do: String.split(head), else: []
+      tail_tokens = if String.trim(tail) != "", do: String.split(tail), else: []
+      token = %{word: phrase, pos: [MultiwordPOS.lookup(phrase)]}
+      head_tokens ++ [token] ++ tail_tokens
     else
-      merge_recursive(words, index + 1, [%{word: word, pos: [:unknown]} | acc], all_words)
+      String.split(input)
     end
   end
 end

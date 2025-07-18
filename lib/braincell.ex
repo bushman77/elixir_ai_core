@@ -67,18 +67,22 @@ end
 
   @impl true
   def init(%{id: _id} = args) do
-    cleaned =
-      args
-      |> Map.merge(%{
-        activation: 0.0,
-        connections: [],
-        position: [0.0, 0.0, 0.0],
-        status: :active
-      })
-      |> sanitize()
 
-    state = struct(__MODULE__, cleaned)
-    {:ok, state}
+args
+|> IO.inspect()
+
+#    cleaned =
+#      args
+#      |> Map.merge(%{
+#        activation: 0.0,
+#        connections: [],
+#        position: [0.0, 0.0, 0.0],
+#        status: :active
+#      })
+#       |> sanitize()
+
+#    state = struct(__MODULE__, cleaned)
+    {:ok, args}
   end
 
   @impl true
