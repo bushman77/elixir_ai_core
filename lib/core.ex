@@ -68,7 +68,7 @@ defmodule Core do
     results =
       Enum.map(cells, fn
         %BrainCell{id: id} = cell ->
-          case Registry.lookup(BrainCell.Registry, id) do
+          case Registry.lookup(Core.Registry, id) do
             [] ->
               case BrainCell.start_link(cell) do
                 {:ok, _pid} ->

@@ -4,34 +4,31 @@ defmodule ElixirAiCore.Repo.Migrations.CreateBrainCells do
   def change do
     create table(:brain_cells, primary_key: false) do
       add :id, :string, primary_key: true
-
-      add :word, :string, null: false
-      add :pos, :string, null: false
-      add :definition, :text
-      add :example, :text
-
-      add :examples, {:array, :string}, default: [], null: false
-      add :synonyms, {:array, :string}, default: [], null: false
-      add :antonyms, {:array, :string}, default: [], null: false
-      add :connections, {:array, :string}, default: [], null: false
-      add :position, {:array, :float}, default: fragment("ARRAY[0.0, 0.0, 0.0]::float8[]"), null: false
-
-      add :type, :string
+      add :token_ids, {:array, :integer}, default: []
+      add :word, :string
+      add :pos, :string
+      add :definition, :string
+      add :example, :string
+      add :synonyms, {:array, :string}
+      add :antonyms, {:array, :string}
       add :function, :string
-
-      add :activation, :float, default: 0.0, null: false
-      add :serotonin, :float, default: 0.0, null: false
-      add :dopamine, :float, default: 0.0, null: false
-
-      add :status, :string, default: "active", null: false
-      add :mood, :string, default: "neutral", null: false
-
+      add :type, :string
+      add :status, :string, default: "inactive"
+      add :activation, :float, default: 0.0
+      add :dopamine, :float, default: 0.0
+      add :serotonin, :float, default: 0.0
+      add :connections, {:array, :string}, default: []
+      add :position, {:array, :float}
+      add :semantic_atoms, {:array, :string}, default: []
       add :last_dose_at, :utc_datetime_usec
       add :last_substance, :string
-add :semantic_atoms, {:array, :string}, default: []
 
       timestamps()
     end
+
+    create index(:brain_cells, [:word])
+    # You may remove or replace this line based on your indexing strategy:
+    # create index(:brain_cells, [:token_ids])  # optional — supported by Postgres 9.4+ with GIN/GIN indexing
   end
 end
 

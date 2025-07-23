@@ -29,5 +29,15 @@ defmodule Core.DB do
 
     exists?(query)
   end
+
+@doc """
+Gets all brain cells for a given word (downcased).
+Returns an empty list if none found.
+"""
+def get_braincells_by_word(word) when is_binary(word) do
+  from(b in BrainCell, where: b.word == ^String.downcase(word))
+  |> all()
+end
+
 end
 

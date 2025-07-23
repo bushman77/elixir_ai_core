@@ -21,7 +21,7 @@ defmodule ElixirAiCore.BrainTrainer do
 
       # Save updated cell
       GenServer.cast(
-        {:via, Registry, {BrainCell.Registry, from}},
+        {:via, Registry, {Core.Registry, from}},
         {:update_connections, updated_from.connections}
       )
     end)

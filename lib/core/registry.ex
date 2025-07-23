@@ -1,5 +1,5 @@
 defmodule Core.Registry do
-  @registry BrainCell.Registry
+  @registry Core.Registry
 
   @doc """
   Starts a BrainCell process and registers it with the Registry under its `id`.

@@ -26,19 +26,20 @@ defp elixirc_paths(_),     do: ["lib"]
     ]
   end
 
-  defp deps do
-    [
-      {:nx, "~> 0.5.1"},
-      {:axon, "~> 0.5.1"},
-      {:jason, "~> 1.4"},
-      {:tesla, "~> 1.4"},
-      {:hackney, "~> 1.18"},
-      {:mox, "~> 1.1", only: :test},
-      {:ecto, "~> 3.10"},
-      {:ecto_sql, "~> 3.10"},
-      {:postgrex, ">= 0.0.0"}
-    ]
-  end
+defp deps do
+  [
+    {:nx, "~> 0.6.2"},
+    {:axon, "~> 0.6.0"},
+    #{:exla, "~> 0.6.3"}, 
+    {:jason, "~> 1.4"},
+    {:tesla, "~> 1.4"},
+    {:hackney, "~> 1.18"},
+    {:mox, "~> 1.1", only: :test},
+    {:ecto, "~> 3.10"},
+    {:ecto_sql, "~> 3.10"},
+    {:postgrex, ">= 0.0.0"}
+  ]
+end
 
   defp aliases do
     [

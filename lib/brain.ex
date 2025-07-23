@@ -4,7 +4,6 @@ defmodule Brain do
   alias Core.DB
   alias BrainCell
   alias LexiconEnricher
-  alias Core.Registry, as: BrainRegistry
 
   ## Public API
 
@@ -13,78 +12,39 @@ defmodule Brain do
   end
 
   @doc """
-  Fetches a single active BrainCell for the given word.
-  Returns nil if none found.
+  Gets a BrainCell process for the given word.
+  Checks registry, loads from DB, or enriches + starts process as fallback.
   """
-  def get(word), do: GenServer.call(__MODULE__, {:get, word})
+def get_or_start(word) when is_binary(word) do
+  word_id = String.downcase(word)
 
-  @doc """
-  Fetches all active BrainCells for the given word.
-  """
-  def get_all(word), do: GenServer.call(__MODULE__, {:get_all, word})
+  # Start all from Registry if already running
+  case Registry.lookup(Core.Registry, word_id) do
+    [{pid, _} | _] ->
+      {:ok, pid}  # Just return the first one for now, or enhance this logic
 
-  @doc """
-  Starts a BrainCell process for a given word and state if not already started.
-  """
-  def start_cell(%BrainCell{id: id} = cell) do
-    case Registry.lookup(BrainRegistry, id) do
-      [{_pid, _value}] -> :ok
-      [] -> BrainCell.start_link(cell)
-    end
+    [] ->
+      # Try load from DB
+      case DB.get_braincells_by_word(word_id) do
+        [] ->
+          # Try enrich from external source
+          case LexiconEnricher.enrich(word_id) do
+            {:ok, cells} when is_list(cells) ->
+              Enum.each(cells, &BrainCell.start_link/1)
+              {:ok, :started}
+
+            _ ->
+              {:error, :not_found}
+          end
+
+        cells ->
+          Enum.each(cells, &BrainCell.start_link/1)
+          {:ok, :started}
+      end
   end
+end
 
-  @doc """
-  Clears all registered brain cells (dangerous, for dev use only).
-  """
-  def reset_all do
-    GenServer.call(__MODULE__, :reset)
-  end
-
-  ## Server Callbacks
-
-  def init(_) do
-    {:ok, %{}}
-  end
-
-  def handle_call({:get, word}, _from, state) do
-    word_id = String.downcase(word)
-
-    cell =
-      BrainRegistry.query(word_id)
-      |> Enum.find_value(fn {_id, pid, _value} ->
-        case safe_status(pid) do
-          {:ok, %BrainCell{} = c} -> c
-          _ -> nil
-        end
-      end)
-
-    {:reply, cell, state}
-  end
-
-  def handle_call({:get_all, word}, _from, state) do
-    word_id = String.downcase(word)
-
-    cells =
-      BrainRegistry.query(word_id)
-      |> Enum.map(fn {_id, pid, _value} ->
-        case safe_status(pid) do
-          {:ok, %BrainCell{} = c} -> c
-          _ -> nil
-        end
-      end)
-      |> Enum.reject(&is_nil/1)
-
-    {:reply, cells, state}
-  end
-
-  def handle_call(:reset, _from, state) do
-    Registry.select(BrainRegistry, [{{:"$1", :"$2", :"$3"}, [], [:"$2"]}])
-    |> Enum.each(fn pid -> Process.exit(pid, :kill) end)
-
-    {:reply, :ok, state}
-  end
-
-  ## Private
+  ## Server Callbacks and other functions omitted for brevity...
 
   defp safe_status(pid) do
     try do

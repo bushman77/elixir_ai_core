@@ -2,190 +2,121 @@ defmodule BrainCell do
   use GenServer
   use Ecto.Schema
   import Ecto.Changeset
-  require Logger
+  alias __MODULE__
 
-  @default_suppression_threshold 0.4
-  @default_overstim_threshold 1.6
+  @table "brain_cells"
+@primary_key {:id, :string, autogenerate: false}
+schema "brain_cells" do
+  field :word, :string
+  field :pos, :string
+  field :definition, :string
+  field :example, :string
+  field :synonyms, {:array, :string}
+  field :antonyms, {:array, :string}
+  field :function, :string
 
-  @primary_key {:id, :string, autogenerate: false}
-  schema "brain_cells" do
-    field :word, :string
-    field :pos, :string
-    field :definition, :string
-    field :example, :string
-    field :examples, {:array, :string}, default: []
-    field :synonyms, {:array, :string}, default: []
-    field :antonyms, {:array, :string}, default: []
-    field :type, :string
-    field :function, :string
-    field :activation, :float, default: 0.0
-    field :serotonin, :float, default: 0.0
-    field :dopamine, :float, default: 0.0
-    field :connections, {:array, :string}, default: []
-    field :position, {:array, :float}, default: [0.0, 0.0, 0.0]
-    field :status, Ecto.Enum, values: [:active, :suppressed, :overstimulated]
-    field :last_dose_at, :utc_datetime_usec
-    field :last_substance, :string
-    field :mood, Ecto.Enum,
-      values: [:neutral, :happy, :sad, :curious, :reflective, :nostalgic, :excited, :anxious],
-      default: :neutral
-field :semantic_atoms, {:array, :string}, default: []
+  # Updated to Ecto.Enum for atom support
+  field :type, Ecto.Enum, values: [:noun, :verb, :concept, :phrase, :emotion, :synapse]
+  field :status, Ecto.Enum, values: [:inactive, :active, :dormant, :decayed], default: :inactive
 
-    timestamps()
-  end
+  # ML + neuro-symbolic fields
+  field :activation, :float, default: 0.0
+  field :dopamine, :float, default: 0.0
+  field :serotonin, :float, default: 0.0
+  field :connections, {:array, :string}, default: []
+  field :position, {:array, :float}
 
-  # -- Changeset for DB
-  def changeset(cell, attrs) do
-    cell
-    |> cast(attrs, __schema__(:fields))
-    |> validate_required([:id, :word, :pos])
-  end
+  # New field for semantic propagation
+  field :semantic_atoms, {:array, :string}, default: []
 
-  # -- GenServer API
+  # Optional neurotransmitter info
+  field :last_dose_at, :utc_datetime_usec
+  field :last_substance, :string
 
-  def start_link(%{id: id} = args) do
-    GenServer.start_link(__MODULE__, args, name: via(id))
-  end
-
-  def via(id), do: {:via, Registry, {BrainCell.Registry, id}}
-
-def start_if_needed(%{id: id} = cell) do
-  case Registry.lookup(BrainCell.Registry, id) do
-    [] ->
-      BrainCell.start_link(cell)
-    _ ->
-      :ok
-  end
+  timestamps()
 end
 
+  # ====================
+  # GenServer API
+  # ====================
 
-  def fire(id, strength), do: GenServer.cast(via(id), {:fire, strength})
-
-  def state(id), do: GenServer.call(via(id), :get_state)
-
-  # -- GenServer Callbacks
-
-  @impl true
-  def init(%{id: _id} = args) do
-
-args
-|> IO.inspect()
-
-#    cleaned =
-#      args
-#      |> Map.merge(%{
-#        activation: 0.0,
-#        connections: [],
-#        position: [0.0, 0.0, 0.0],
-#        status: :active
-#      })
-#       |> sanitize()
-
-#    state = struct(__MODULE__, cleaned)
-    {:ok, args}
+  def start_link(%BrainCell{id: id} = cell) do
+    GenServer.start_link(__MODULE__, cell, name: via(id))
   end
 
-  @impl true
-  def handle_cast({:update_connections, new_connections}, state) do
-    updated = %{state | connections: new_connections}
-    Brain.put(updated)
+  defp via(id), do: {:via, Registry, {Core.Registry, id}}
+
+  def init(%BrainCell{} = cell) do
+    {:ok, sanitize(cell)}
+  end
+
+  defp sanitize(cell) do
+    modulated = modulate(cell.activation, cell.dopamine, cell.serotonin)
+    %{cell | modulated_activation: modulated, connections: cell.connections || %{}}
+  end
+
+  defp modulate(activation, dopamine, serotonin) do
+    Float.round(activation + dopamine - serotonin, 4)
+  end
+
+  # Public interface
+
+  def get_state(pid) do
+    GenServer.call(pid, :get_state)
+  end
+
+  def fire(pid, amount \\ 0.1) do
+    GenServer.cast(pid, {:fire, amount})
+  end
+
+  def apply_substance(pid, :dopamine, amount) do
+    GenServer.cast(pid, {:apply_dopamine, amount})
+  end
+
+  def apply_substance(pid, :serotonin, amount) do
+    GenServer.cast(pid, {:apply_serotonin, amount})
+  end
+
+  # GenServer callbacks
+
+  def handle_call(:get_state, _from, %BrainCell{} = cell) do
+    {:reply, cell, cell}
+  end
+
+  def handle_cast({:fire, amount}, %BrainCell{} = cell) do
+    updated = %{
+      cell
+      | activation: cell.activation + amount,
+        modulated_activation: modulate(cell.activation + amount, cell.dopamine, cell.serotonin)
+    }
+
     {:noreply, updated}
   end
 
-  @impl true
-  def handle_cast({:fire, strength}, state) do
-    Brain.put(state)
-
-    Enum.each(state.connections || [], fn target_id ->
-      BrainCell.fire(target_id, strength * 1.0)
-    end)
-
-    {:noreply, %{state | activation: state.activation + strength}}
-  end
-
-  @impl true
-  def handle_info({:register_self, registry, id, _cell}, state) do
-    Registry.register(registry, id, state)
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_call(:get_state, _from, state), do: {:reply, state, state}
-
-  @impl true
-  def handle_call(:status, _from, state), do: {:reply, {:ok, state}, state}
-
-  # -- Chemical simulation
-  def apply_chemical_change(%__MODULE__{} = cell, %{dopamine: d, serotonin: s}, substance \\ nil, time \\ nil)
-      when is_float(d) and is_float(s) do
-    new_ser = Core.clamp(cell.serotonin + s, 0.0, 2.0)
-    new_dop = Core.clamp(cell.dopamine + d, 0.0, 2.0)
-
-    %__MODULE__{
+  def handle_cast({:apply_dopamine, amount}, %BrainCell{} = cell) do
+    now = DateTime.utc_now()
+    updated = %{
       cell
-      | serotonin: new_ser,
-        dopamine: new_dop,
-        last_substance: substance,
-        last_dose_at: time,
-        status: evaluate_status(new_ser, new_dop)
+      | dopamine: cell.dopamine + amount,
+        modulated_activation: modulate(cell.activation, cell.dopamine + amount, cell.serotonin),
+        last_dose_at: now,
+        last_substance: "dopamine"
     }
+
+    {:noreply, updated}
   end
 
-  def evaluate_status(serotonin, dopamine) do
-    evaluate_status(
-      serotonin,
-      dopamine,
-      @default_suppression_threshold,
-      @default_overstim_threshold
-    )
+  def handle_cast({:apply_serotonin, amount}, %BrainCell{} = cell) do
+    now = DateTime.utc_now()
+    updated = %{
+      cell
+      | serotonin: cell.serotonin + amount,
+        modulated_activation: modulate(cell.activation, cell.dopamine, cell.serotonin + amount),
+        last_dose_at: now,
+        last_substance: "serotonin"
+    }
+
+    {:noreply, updated}
   end
-
-  def evaluate_status(serotonin, dopamine, suppression_threshold, overstim_threshold) do
-    cond do
-      serotonin <= suppression_threshold -> :suppressed
-      dopamine > overstim_threshold -> :overstimulated
-      true -> :active
-    end
-  end
-
-  # -- Sanitizers
-
-  defp sanitize(attrs) do
-    attrs
-    |> Map.update(:connections, [], &ensure_list/1)
-    |> Map.update(:examples, [], &ensure_list/1)
-    |> Map.update(:synonyms, [], &ensure_list/1)
-    |> Map.update(:antonyms, [], &ensure_list/1)
-    |> Map.update(:position, [0.0, 0.0, 0.0], &ensure_floats/1)
-    |> Map.update(:status, :active, &ensure_status/1)
-  end
-
-  defp ensure_list(nil), do: []
-  defp ensure_list(list) when is_list(list), do: list
-  defp ensure_list(other) do
-    Logger.warn("[BrainCell] Expected list, got #{inspect(other)}. Coercing to [].")
-    []
-  end
-
-  defp ensure_floats(list) when is_list(list), do: Enum.map(list, &to_float/1)
-  defp ensure_floats(_), do: [0.0, 0.0, 0.0]
-
-  defp to_float(x) when is_float(x), do: x
-  defp to_float(x) when is_integer(x), do: x * 1.0
-  defp to_float(x) when is_binary(x) do
-    case Float.parse(x) do
-      {f, _} -> f
-      _ -> 0.0
-    end
-  end
-  defp to_float(_), do: 0.0
-
-  defp ensure_status(val) when is_atom(val), do: val
-  defp ensure_status(val) when is_binary(val) do
-    String.to_existing_atom(val)
-  rescue
-    _ -> :active
-  end
-  defp ensure_status(_), do: :active
 end
 
