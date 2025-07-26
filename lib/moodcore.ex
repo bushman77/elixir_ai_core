@@ -1,99 +1,95 @@
 defmodule MoodCore do
-  @moduledoc """
-  Tracks the AI's emotional state.
-
-  Each mood has an intensity score that decays over time and is reinforced by BrainCell activity.
-  """
-
   use GenServer
 
-  @default_mood :neutral
-  @decay_rate 0.01
-  @decay_interval 5_000
+  @moduledoc """
+  MoodCore tracks the evolving emotional state of the system, influenced by
+  dopamine and serotonin levels from active BrainCells. Mood intensities decay
+  over time toward neutrality unless reinforced.
+  """
 
-  @mood_states [
-    :neutral,
-    :happy,
-    :sad,
-    :curious,
-    :reflective,
-    :nostalgic,
-    :excited,
-    :anxious
-  ]
+  @moods [:happy, :excited, :sad, :nostalgic, :reflective, :neutral]
+  @decay_rate 0.005
 
-  # --- Public API ---
+  ## Public API
 
   def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
 
-  @doc "Returns the current dominant mood."
-  def current_mood(), do: GenServer.call(__MODULE__, :get_mood)
+  @doc "Returns the current dominant mood (the highest-intensity one)."
+  def current_mood, do: GenServer.call(__MODULE__, :current_mood)
 
-  @doc "Reinforces a mood with an optional strength (default: 1.0)."
-  def reinforce(mood, strength \\ 1.0), do: GenServer.cast(__MODULE__, {:reinforce, mood, strength})
+  @doc "Returns the intensity of a given mood (0.0 to 1.0)."
+  def mood_score(mood), do: GenServer.call(__MODULE__, {:mood_score, mood})
 
-  @doc "Triggers a manual decay tick (usually unnecessary)."
-  def decay(), do: GenServer.cast(__MODULE__, :decay)
+  @doc "Registers neurotransmitter levels from a firing BrainCell."
+  def register_activation(%{dopamine: d, serotonin: s}) when is_number(d) and is_number(s) do
+    GenServer.cast(__MODULE__, {:register_activation, d, s})
+  end
 
-  # --- Internal GenServer State: %{
-  #   mood: atom(),
-  #   intensities: %{mood => float},
-  #   last_updated: DateTime.t()
-  # }
+  @doc "Ticks the mood state forward, applying decay."
+  def tick, do: GenServer.cast(__MODULE__, :tick)
 
-  # --- GenServer Callbacks ---
+  ## GenServer Callbacks
 
   def init(_) do
-    initial_state = %{
-      mood: @default_mood,
-      intensities: Map.new(@mood_states, &{&1, 0.0}),
+    state = %{
+      intensities: Map.new(@moods, fn m -> {m, 0.0} end),
       last_updated: now()
     }
 
-    schedule_decay()
-    {:ok, initial_state}
+    {:ok, state}
   end
 
-  def handle_call(:get_mood, _from, state) do
-    dominant = dominant_mood(state.intensities)
-    {:reply, dominant, %{state | mood: dominant}}
+  def handle_call(:current_mood, _from, %{intensities: intensities} = state) do
+    mood = Enum.max_by(intensities, fn {_mood, intensity} -> intensity end) |> elem(0)
+    {:reply, mood, state}
   end
 
-  def handle_cast({:reinforce, mood, strength}, %{intensities: intensities} = state) do
-    updated = Map.update(intensities, mood, strength, &min(&1 + strength, 1.0))
-    {:noreply, %{state | intensities: updated, last_updated: now()}}
+  def handle_call({:mood_score, mood}, _from, %{intensities: intensities} = state) do
+    {:reply, Map.get(intensities, mood, 0.0), state}
   end
 
-  def handle_cast(:decay, state), do: handle_decay(state)
+  def handle_cast({:register_activation, dopamine, serotonin}, state) do
+    mood = mood_from_neurotransmitters(dopamine, serotonin)
+    new_state = reinforce_mood(mood, dopamine, state)
+    {:noreply, new_state}
+  end
 
-  def handle_info(:decay, state), do: handle_decay(state)
+  def handle_cast(:tick, state) do
+    {:noreply, decay(state)}
+  end
 
-  # --- Private ---
+  ## Helpers
 
-  defp handle_decay(%{intensities: intensities} = state) do
-    decayed =
-      Enum.map(intensities, fn {mood, value} ->
-        {mood, max(0.0, value - @decay_rate)}
+  defp now(), do: System.system_time(:millisecond)
+
+  defp decay(%{intensities: intensities, last_updated: last} = state) do
+    elapsed_ms = now() - last
+    decay_factor = @decay_rate * (elapsed_ms / 1000)
+
+    updated =
+      Enum.map(intensities, fn {mood, intensity} ->
+        new_intensity = max(intensity - decay_factor, 0.0)
+        {mood, Float.round(new_intensity, 4)}
       end)
+      |> Enum.into(%{})
 
-    schedule_decay()
-    {:noreply, %{state | intensities: Map.new(decayed), last_updated: now()}}
+    %{state | intensities: updated, last_updated: now()}
   end
 
-  defp dominant_mood(intensities) do
-    Enum.max_by(intensities, fn {_mood, score} -> score end)
-    |> elem(0)
+  defp reinforce_mood(mood, strength, %{intensities: intensities} = state) do
+    updated = Map.update(intensities, mood, strength, &min(&1 + strength, 1.0))
+    %{state | intensities: updated, last_updated: now()}
   end
 
-  defp schedule_decay, do: Process.send_after(self(), :decay, @decay_interval)
-
-  defp now, do: DateTime.utc_now()
-
-@spec register_activation(BrainCell.t()) :: :ok
-def register_activation(%BrainCell{dopamine: d, serotonin: s}) do
-  # Adjust internal state based on neurotransmitter inputs
-  GenServer.cast(__MODULE__, {:register_activation, d, s})
-end
-
+  defp mood_from_neurotransmitters(dopamine, serotonin) do
+    cond do
+      dopamine > 0.6 and serotonin > 0.6 -> :happy
+      dopamine > 0.6 and serotonin < 0.3 -> :excited
+      dopamine < 0.3 and serotonin > 0.6 -> :reflective
+      dopamine < 0.3 and serotonin < 0.3 -> :sad
+      serotonin > 0.5 and dopamine < 0.5 -> :nostalgic
+      true -> :neutral
+    end
+  end
 end
 

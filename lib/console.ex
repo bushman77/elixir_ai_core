@@ -63,13 +63,15 @@ defmodule Console do
 
   defp handle_input(""), do: :ok
 
-  defp handle_input(".enrich"), do: IO.puts("Usage: .enrich <word>")
+  defp handle_input(".enrich") do
+    IO.puts("Usage: .enrich <word>")
+  end
 
   defp handle_input(".enrich " <> word) do
     word = String.trim(word)
 
-    case LexiconEnricher.enrich(word) do
-      :ok ->
+    case LexiconEnricher.update(word) do
+      {:ok, _cells} ->
         entries = DB.all(from b in BrainCell, where: b.word == ^word)
 
         if entries == [] do
@@ -105,44 +107,13 @@ defmodule Console do
   end
 
   defp handle_input(input) do
-    tokens = Tokenizer.tokenize(input)
+    tokens = Tokenizer.resolve_phrases(input)
+    Core.set_attention tokens
     IO.inspect(tokens, label: "🧠 Tokens")
-
-    Enum.each(tokens, fn token ->
-      if token.pos == [:unknown] do
-        case DB.all(from b in BrainCell, where: b.word == ^token.word) do
-          [] -> IO.puts("⚠️ No brain cells found for #{token.word}")
-          _ -> :ok
-        end
-      end
-    end)
-
-    # 🔁 RECALL: Check last memory
-    case Core.MemoryCore.recent(1) do
-      [%{intent: :question, text: last}] ->
-        IO.puts("🤔 You previously asked: #{last}. Want to follow up?")
-
-      _ ->
-        :ok
-    end
-
-    # 🧠 Reason and respond
-    case Core.resolve_and_classify(input) do
-      {:answer, analysis} ->
-        IO.inspect(analysis, label: "🤖")
-
-        case Core.ResponsePlanner.plan(analysis) do
-          {:reply, message} -> IO.puts("😄 [🧠 AI] #{message}")
-          message when is_binary(message) -> IO.puts("😄 [🧠 AI] #{message}")
-          other -> IO.inspect(other, label: "⚠️ Unexpected response format")
-        end
-
-      {:error, :dictionary_missing} ->
-        IO.puts("🤖: I believe I have misplaced my dictionary.")
-    end
   end
 
-  # Optional mood mapping for intents
+  # -- Optional mood mapping for intents --
+
   defp mood_for_intent(:greeting), do: :happy
   defp mood_for_intent(:farewell), do: :sad
   defp mood_for_intent(:reflect), do: :reflective

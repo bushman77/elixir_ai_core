@@ -1,6 +1,6 @@
 defmodule Core.ResponsePlanner do
   @moduledoc """
-  Chooses a response based on intent and optionally keyword/context.
+  Chooses a response based on intent, keyword, confidence, and context.
   """
 
   alias Brain
@@ -8,21 +8,39 @@ defmodule Core.ResponsePlanner do
   alias PhraseGenerator
   alias Core.MemoryCore
 
-  def plan(%{intent: :greeting}), do: "Hey there! 👋 How can I assist you today?"
+  @high 0.6
+  @low 0.3
 
-  def plan(%{intent: :farewell}), do: "Goodbye for now. Take care out there."
+  # === Primary entry point ===
+  def plan(%{intent: :greeting, confidence: conf}) when conf >= @high do
+    "Hey there! 👋 How can I assist you today?"
+  end
 
-  def plan(%{intent: :reflect, keyword: word}) do
+  def plan(%{intent: :farewell, confidence: conf}) when conf >= @low do
+    "Goodbye for now. Take care out there."
+  end
+
+  def plan(%{intent: :question, keyword: word, confidence: conf}) do
+    case {word, conf} do
+      {"why", c} when c > @high -> "Why questions are my favorite! Let’s explore."
+      {"how", c} when c > @low -> "How things work can be fascinating — what specifically?"
+      {"what", _} -> "What would you like to explore more?"
+      {w, c} when c < @low -> "That sounds like a question about \"#{w}\", but I’m not too sure. Could you clarify?"
+      {w, _} -> "Great question on \"#{w}\". Let me try to help!"
+    end
+  end
+
+  def plan(%{intent: :reflect, keyword: word, confidence: conf}) when conf > @low do
     phrase = PhraseGenerator.generate_phrase(word, mood: :reflective)
     "Hmm… #{word} makes me think of: #{phrase}"
   end
 
-  def plan(%{intent: :recall, keyword: word}) do
+  def plan(%{intent: :recall, keyword: word, confidence: conf}) when conf > @low do
     phrase = PhraseGenerator.generate_phrase(word, mood: :nostalgic)
     "I remember something like: #{phrase}"
   end
 
-  def plan(%{intent: :define, keyword: word}) do
+  def plan(%{intent: :define, keyword: word, confidence: conf}) when conf > @low do
     case Brain.get(word) do
       %BrainCell{definition: defn} -> "#{word}: #{defn}"
       _ -> "I haven’t learned that word yet."
@@ -31,29 +49,25 @@ defmodule Core.ResponsePlanner do
 
   def plan(%{intent: :unknown, keyword: word}) do
     phrase = PhraseGenerator.generate_phrase(word, mood: :curious)
-    "I'm not quite sure about that… but #{word} brings to mind: #{phrase}"
+    "I'm not quite sure about that… but '#{word}' brings to mind: #{phrase}"
   end
 
-  def plan(%{intent: :question, keyword: word}) do
-    case word do
-      "how" -> "How something works can be complex! Could you specify a bit more?"
-      "what" -> "What exactly are you curious about?"
-      "why" -> "Why questions are the best! What’s got you wondering?"
-      _ -> "That’s an interesting question about '#{word}'. I'll do my best to help!"
-    end
+  # === Context-aware fallback ===
+  def plan(%{intent: intent, keyword: word, confidence: conf}) when conf < @low do
+    "I noticed the intent `#{intent}` with `#{word}`, but I'm unsure. Want to clarify?"
   end
 
-  def plan(%{intent: intent, keyword: word} = data) when intent != :question do
+  def plan(%{intent: intent, keyword: word}) do
     recent = MemoryCore.recent(1)
 
     case recent do
       [%{intent: last_intent, keyword: last_word}] ->
         cond do
           last_intent == :question and intent == :question ->
-            "Still thinking about that? Let's dive deeper into \"#{word}\"."
+            "Still thinking about that? Let’s dive deeper into \"#{word}\"."
 
           last_word == word and intent in [:reflect, :recall] ->
-            "You brought up \"#{word}\" again — let’s look at it differently."
+            "You mentioned \"#{word}\" again — here’s a fresh take."
 
           true ->
             fallback_response(intent, word)
@@ -64,12 +78,13 @@ defmodule Core.ResponsePlanner do
     end
   end
 
+  def plan(_), do: "Hmm… I didn’t quite understand that."
+
+  # === Helpers ===
   defp fallback_response(intent, nil),
-    do: "I noticed the intent `#{inspect(intent)}`, but I’m not sure how to proceed without more context."
+    do: "I picked up `#{intent}`, but I need a bit more to go on."
 
   defp fallback_response(intent, word),
-    do: "I noticed the intent `#{inspect(intent)}` with keyword `#{word}`, but couldn’t handle that form yet."
-
-  def plan(_other), do: "Hmm… I didn’t quite understand that."
+    do: "I noticed `#{intent}` and `#{word}`, but couldn’t handle that combo just yet."
 end
 

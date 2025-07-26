@@ -23,6 +23,8 @@ defmodule LexiconEnricher do
 
   def enrich(_), do: {:error, :invalid_word}
 
+  def update(word), do: fetch_from_api(word)
+    
   defp fetch_from_api(word) do
     with {:ok, %{status: 200, body: [%{"word" => w, "meanings" => meanings} | _]}} <- LexiconClient.fetch_word(word),
          cells when is_list(cells) <- build_cells(w, meanings) do

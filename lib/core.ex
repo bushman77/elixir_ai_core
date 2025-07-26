@@ -10,20 +10,19 @@ defmodule Core do
   alias Brain
   alias BrainCell
   alias LexiconEnricher
-  alias Core.{Tokenizer, IntentMatrix, MultiwordMatcher}
+  alias Core.{Tokenizer, IntentMatrix, DB}
   import Core.POS, only: [normalize_pos: 1]
 
   # ---------------------------------------------------------------------
-  # 🧠 BrainCell Construction & Memory Management
+  # 🧠 BrainCell Construction & Memory
   # ---------------------------------------------------------------------
 
   @spec extract_definitions(map()) :: [map()]
   def extract_definitions(%{"word" => word, "meanings" => meanings}) when is_list(meanings) do
     Enum.flat_map(meanings, fn %{"partOfSpeech" => pos_str, "definitions" => defs} ->
       pos = normalize_pos(pos_str)
-      defs = defs || []
 
-      Enum.map(defs, fn def ->
+      Enum.map(defs || [], fn def ->
         %{
           word: word,
           pos: pos,
@@ -66,37 +65,26 @@ defmodule Core do
   @spec memorize([BrainCell.t()]) :: {:ok, [String.t()]} | {:error, list()}
   def memorize(cells) when is_list(cells) do
     results =
-      Enum.map(cells, fn
-        %BrainCell{id: id} = cell ->
-          case Registry.lookup(Core.Registry, id) do
-            [] ->
-              case BrainCell.start_link(cell) do
-                {:ok, _pid} ->
-                  debug_log(cell)
-                  Brain.put(cell)
-                  {:ok, id}
+      Enum.map(cells, fn %BrainCell{id: id} = cell ->
+        case Registry.lookup(Core.Registry, id) do
+          [] ->
+            case BrainCell.start_link(cell) do
+              {:ok, _pid} ->
+                debug_log(cell)
+                Brain.put(cell)
+                {:ok, id}
+              {:error, reason} ->
+                {:error, {id, reason}}
+            end
 
-                {:error, reason} ->
-                  {:error, {id, reason}}
-              end
-
-            [_] ->
-              {:ok, id}
-          end
-
-        {:error, reason} ->
-          {:error, reason}
-
-        unexpected ->
-          {:error, {:unexpected_input, unexpected}}
+          [_] ->
+            {:ok, id}
+        end
       end)
 
-    errors = Enum.filter(results, &match?({:error, _}, &1))
-
-    if errors == [] do
-      {:ok, Enum.map(results, fn {:ok, id} -> id end)}
-    else
-      {:error, errors}
+    case Enum.filter(results, &match?({:error, _}, &1)) do
+      [] -> {:ok, Enum.map(results, fn {:ok, id} -> id end)}
+      errors -> {:error, errors}
     end
   end
 
@@ -118,63 +106,135 @@ defmodule Core do
   defp resolve_and_classify(input, depth) do
     tokens = Tokenizer.tokenize(input)
 
-    unknown_words =
-      tokens
-      |> Enum.filter(&Enum.member?(&1.pos, :unknown))
-      |> Enum.map(& &1.word)
-      |> Enum.uniq()
-
-    case unknown_words do
+    case extract_unknown_words(tokens) do
       [] ->
-        classification = IntentMatrix.classify(tokens)
-
         {:answer,
-         Map.merge(classification, %{
+         Map.merge(IntentMatrix.classify(tokens), %{
            tokens: tokens,
            keyword: extract_keyword(tokens)
          })}
 
       unknowns ->
-        results =
-          Enum.map(unknowns, fn phrase_or_word ->
-            with {:ok, cells} <- LexiconEnricher.enrich(phrase_or_word),
-                 {:ok, _} <- memorize(cells) do
-              IO.inspect(cells, label: "🧬 Enriched brain cells for #{phrase_or_word}")
-              :ok
-            else
-              _ -> {:error, phrase_or_word}
-            end
-          end)
-
-        if Enum.any?(results, &match?({:error, _}, &1)) do
-          {:error, :dictionary_missing}
-        else
-          resolve_and_classify(input, depth + 1)
+        case handle_unknowns(unknowns) do
+          :ok -> resolve_and_classify(input, depth + 1)
+          _ -> {:error, :dictionary_missing}
         end
     end
   end
 
-  defp extract_keyword([%{word: word} | _]), do: word
+  defp extract_unknown_words(tokens) do
+    tokens
+    |> Enum.filter(&Enum.member?(&1.pos, :unknown))
+    |> Enum.map(& &1.word)
+    |> Enum.uniq()
+  end
+
+  defp handle_unknowns(words) do
+    results =
+      Enum.map(words, fn word ->
+        with {:ok, cells} <- LexiconEnricher.enrich(word),
+             {:ok, _} <- memorize(cells) do
+          IO.inspect(cells, label: "🧬 Enriched brain cells for #{word}")
+          :ok
+        else
+          _ -> {:error, word}
+        end
+      end)
+
+    if Enum.any?(results, &match?({:error, _}, &1)), do: {:error, :fail}, else: :ok
+  end
+
+  defp extract_keyword([%{word: w} | _]), do: w
   defp extract_keyword(_), do: "that"
 
   # ---------------------------------------------------------------------
-  # 🛠️ Helpers
+  # 🛠️ Activation & Attention Helpers
   # ---------------------------------------------------------------------
 
-  @doc "Clamp a float value between min and max bounds."
   @spec clamp(float(), float(), float()) :: float()
   def clamp(val), do: clamp(val, 0.0, 2.0)
 
-  def clamp(val, min, max) when is_float(val) and is_float(min) and is_float(max) do
-    val |> max(min) |> min(max)
-  end
+  def clamp(val, min, max) when is_float(val), do: val |> max(min) |> min(max)
 
   defp debug_log(value) do
     if Application.get_env(:elixir_ai_core, :debug, false) do
       IO.inspect(value, label: "DEBUG")
-    else
-      :ok
     end
+  end
+
+  @doc """
+  Ensures attention on tokens: for any phrase not already in attention, start its cell.
+  """
+  def set_attention(tokens) when is_list(tokens) do
+    state = Brain.get_state()
+    active_ids = state.attention
+
+    Enum.each(tokens, fn %{phrase: phrase} ->
+      unless phrase_in_attention?(phrase, active_ids), do: ensure_cell_started(phrase)
+    end)
+  end
+
+  defp phrase_in_attention?(phrase, active_ids) do
+    Enum.any?(active_ids, fn
+      %BrainCell{word: w} -> w == phrase
+      id when is_binary(id) -> id == phrase
+      _ -> false
+    end)
+  end
+
+  @doc """
+  Ensures a brain cell for the given phrase is active,
+  enriching and starting it if necessary.
+  """
+  @spec ensure_cell_started(String.t()) :: :ok | {:error, any()}
+  def ensure_cell_started(phrase) when is_binary(phrase) do
+    case Registry.lookup(Core.Registry, phrase) do
+      [_] -> :ok
+      [] -> maybe_start_cell(phrase)
+    end
+  end
+
+  defp maybe_start_cell(phrase) do
+    cond do
+      DB.cell_exists?(phrase) ->
+        Brain.get_or_start(phrase)
+
+      true ->
+case LexiconEnricher.enrich(phrase) do
+  {:ok, [%BrainCell{} | _] = cells} ->
+    Enum.each(cells, &DB.insert_cell!/1)
+    Enum.each(cells, fn cell -> Brain.get_or_start(cell.word) end)
+    :ok
+
+  {:ok, %BrainCell{} = cell} ->  # fallback for single structs just in case
+    DB.insert_cell!(cell)
+    Brain.get_or_start(cell.word)
+
+  {:ok, :already_known} ->
+    Brain.get_or_start(phrase)
+
+  :already_known ->
+    Brain.get_or_start(phrase)
+
+  {:error, :not_found} ->
+    try_fragments(phrase)
+
+  {:error, reason} ->
+    {:error, reason}
+end
+        
+    end
+  end
+
+  defp try_fragments(phrase) do
+    phrase
+    |> Tokenizer.fragment_phrases()
+    |> Enum.find_value(fn frag ->
+      case ensure_cell_started(frag) do
+        :ok -> :ok
+        _ -> nil
+      end
+    end) || {:error, :not_found}
   end
 end
 
