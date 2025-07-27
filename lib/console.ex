@@ -1,29 +1,23 @@
 defmodule Console do
   use GenServer
+  import Ecto.Query
+
+  alias Core.{Tokenizer, DB}
+  alias LexiconEnricher
+  alias Core
+  alias Brain
 
   @moduledoc """
   Interactive console for AI Brain.
-  Type any sentence and the system will tokenize it, enrich unknown words,
-  register brain cells, and show analysis.
+
+  Type any sentence and the system will tokenize it,
+  enrich unknown words, register brain cells, and show analysis.
   """
-
-  import Ecto.Query
-
-  alias Core.Tokenizer
-  alias Core
-  alias LexiconEnricher
-  alias Core.DB
-  alias Brain
 
   # -- Public API --
 
-  def start_link(_opts) do
-    GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
-  end
-
-  def start do
-    GenServer.cast(__MODULE__, :prompt)
-  end
+  def start_link(_opts), do: GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
+  def start, do: GenServer.cast(__MODULE__, :prompt)
 
   # -- GenServer Callbacks --
 
@@ -34,43 +28,32 @@ defmodule Console do
   end
 
   def handle_cast(:prompt, state) do
-    try do
-      input = IO.gets("> ")
+    case IO.gets("> ") do
+      nil ->
+        IO.puts("\nGoodbye!")
+        {:stop, :normal, state}
 
-      case input do
-        nil ->
-          IO.puts("\nGoodbye!")
-          {:stop, :normal, state}
-
-        _ ->
-          input
-          |> String.trim()
-          |> handle_input()
-
-          GenServer.cast(self(), :prompt)
-          {:noreply, state}
-      end
-    rescue
-      exception ->
-        IO.puts("↳ #{Exception.message(exception)}")
-        IO.inspect(__STACKTRACE__)
+      input ->
+        handle_input(String.trim(input))
         GenServer.cast(self(), :prompt)
         {:noreply, state}
     end
+  rescue
+    exception ->
+      IO.puts("↳ #{Exception.message(exception)}")
+      IO.inspect(__STACKTRACE__)
+      GenServer.cast(self(), :prompt)
+      {:noreply, state}
   end
 
   # -- Input Handling --
 
   defp handle_input(""), do: :ok
 
-  defp handle_input(".enrich") do
-    IO.puts("Usage: .enrich <word>")
-  end
+  defp handle_input(".enrich"), do: IO.puts("Usage: .enrich <word>")
 
   defp handle_input(".enrich " <> word) do
-    word = String.trim(word)
-
-    case LexiconEnricher.update(word) do
+    case LexiconEnricher.update(String.trim(word)) do
       {:ok, _cells} ->
         entries = DB.all(from b in BrainCell, where: b.word == ^word)
 
@@ -81,7 +64,6 @@ defmodule Console do
           Enum.each(entries, fn
             %BrainCell{pos: pos, definition: defn} ->
               IO.puts(" • [#{pos}] #{defn}")
-
             other ->
               IO.puts("⚠️ Unexpected DB entry: #{inspect(other)}")
           end)
@@ -102,24 +84,34 @@ defmodule Console do
     rescue
       error -> IO.puts("❌ Eval Error: #{inspect(error)}")
     end
-
-    :ok
   end
 
-  defp handle_input(input) do
-    tokens = Tokenizer.resolve_phrases(input)
-    Core.set_attention tokens
-    IO.inspect(tokens, label: "🧠 Tokens")
+defp handle_input(input) do
+  case Core.resolve_and_classify(input) do
+    {:answer, %{intent: intent, keyword: keyword, confidence: confidence, tokens: tokens}} ->
+      IO.puts("🧠 Intent Classification:")
+      IO.puts(" → Intent: #{intent}")
+      IO.puts(" → Keyword: #{keyword}")
+      IO.puts(" → Confidence: #{Float.round(confidence, 2)}")
+      IO.puts("🧠 Tokens:")
+      Enum.each(tokens, &print_token/1)
+
+    {:error, :dictionary_missing} ->
+      IO.puts("❌ Could not resolve unknown words. Try enriching the lexicon.")
+
+    {:error, reason} ->
+      IO.puts("❌ Failed to classify input: #{inspect(reason)}")
+  end
+end
+
+  # -- Helpers --
+
+  defp print_token(%{word: word, pos: pos, keyword: keyword, intent: intent, confidence: conf}) do
+    IO.puts(" • #{word} [#{pos}]  → intent: #{intent}, keyword: #{keyword}, conf: #{conf}")
   end
 
-  # -- Optional mood mapping for intents --
-
-  defp mood_for_intent(:greeting), do: :happy
-  defp mood_for_intent(:farewell), do: :sad
-  defp mood_for_intent(:reflect), do: :reflective
-  defp mood_for_intent(:recall), do: :nostalgic
-  defp mood_for_intent(:define), do: :neutral
-  defp mood_for_intent(:unknown), do: :curious
-  defp mood_for_intent(_), do: :neutral
+  defp print_token(token) do
+    IO.puts(" • #{inspect(token)}")
+  end
 end
 

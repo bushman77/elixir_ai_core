@@ -39,5 +39,9 @@ def get_braincells_by_word(word) when is_binary(word) do
   |> all()
 end
 
+def insert_cell!(%BrainCell{} = cell) do
+    __MODULE__.insert!(cell)
+  end
+
 end
 

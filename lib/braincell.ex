@@ -5,28 +5,28 @@ defmodule BrainCell do
 
   alias __MODULE__
 
-  @table "brain_cells"
   @primary_key {:id, :string, autogenerate: false}
+  @table "brain_cells"
 
-  schema "brain_cells" do
+  schema @table do
     field :word, :string
     field :pos, :string
     field :definition, :string
     field :example, :string
-    field :synonyms, {:array, :string}
-    field :antonyms, {:array, :string}
+    field :synonyms, {:array, :string}, default: []
+    field :antonyms, {:array, :string}, default: []
     field :function, :string
 
-    # Enum support for classification
+    # Classification enums
     field :type, Ecto.Enum, values: [:noun, :verb, :concept, :phrase, :emotion, :synapse]
     field :status, Ecto.Enum, values: [:inactive, :active, :dormant, :decayed], default: :inactive
 
-    # ML + neuro-symbolic fields
+    # Neuro-symbolic fields
     field :activation, :float, default: 0.0
     field :dopamine, :float, default: 0.0
     field :serotonin, :float, default: 0.0
     field :connections, {:array, :string}, default: []
-    field :position, {:array, :float}
+    field :position, {:array, :float}, default: [0.0, 0.0, 0.0]
     field :semantic_atoms, {:array, :string}, default: []
 
     # Chemical dosing info
@@ -36,9 +36,9 @@ defmodule BrainCell do
     timestamps()
   end
 
-  # ====================
+  # --------------------
   # GenServer API
-  # ====================
+  # --------------------
 
   def start_link(%BrainCell{id: id} = cell) do
     GenServer.start_link(__MODULE__, cell, name: via(id))
@@ -57,45 +57,42 @@ defmodule BrainCell do
 
   def fire(pid, amount \\ 0.1), do: GenServer.cast(pid, {:fire, amount})
 
-  def apply_substance(pid, :dopamine, amount),
-    do: GenServer.cast(pid, {:apply_dopamine, amount})
+  def apply_substance(pid, :dopamine, amount), do: GenServer.cast(pid, {:apply_dopamine, amount})
+  def apply_substance(pid, :serotonin, amount), do: GenServer.cast(pid, {:apply_serotonin, amount})
 
-  def apply_substance(pid, :serotonin, amount),
-    do: GenServer.cast(pid, {:apply_serotonin, amount})
-
-  # GenServer callbacks
+  # --------------------
+  # GenServer Callbacks
+  # --------------------
 
   def handle_call(:get_state, _from, %BrainCell{} = cell), do: {:reply, cell, cell}
 
   def handle_cast({:fire, amount}, %BrainCell{} = cell) do
+    new_activation = clamp(cell.activation + amount)
     updated = %{
       cell
-      | activation: cell.activation + amount,
-        modulated_activation:
-          modulated_activation(cell.activation + amount, cell.dopamine, cell.serotonin)
+      | activation: new_activation,
+        modulated_activation: modulated_activation(new_activation, cell.dopamine, cell.serotonin)
     }
-
     {:noreply, updated}
   end
 
   def handle_cast({:apply_dopamine, amount}, %BrainCell{} = cell) do
     now = DateTime.utc_now()
-    new_dopa = cell.dopamine + amount
+    new_dopamine = clamp(cell.dopamine + amount)
 
     updated = %{
       cell
-      | dopamine: new_dopa,
-        modulated_activation: modulated_activation(cell.activation, new_dopa, cell.serotonin),
+      | dopamine: new_dopamine,
+        modulated_activation: modulated_activation(cell.activation, new_dopamine, cell.serotonin),
         last_dose_at: now,
         last_substance: "dopamine"
     }
-
     {:noreply, updated}
   end
 
   def handle_cast({:apply_serotonin, amount}, %BrainCell{} = cell) do
     now = DateTime.utc_now()
-    new_serotonin = cell.serotonin + amount
+    new_serotonin = clamp(cell.serotonin + amount)
 
     updated = %{
       cell
@@ -104,13 +101,12 @@ defmodule BrainCell do
         last_dose_at: now,
         last_substance: "serotonin"
     }
-
     {:noreply, updated}
   end
 
-  # ====================
+  # --------------------
   # Helpers
-  # ====================
+  # --------------------
 
   def modulated_activation(activation, dopamine, serotonin) do
     Float.round(activation + dopamine - serotonin, 4)

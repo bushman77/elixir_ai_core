@@ -1,50 +1,30 @@
 defmodule LexiconEnricher do
   @moduledoc """
-  Enriches a word by checking the database first, then fetching from the online dictionary if not found.
-  Builds BrainCell structs and inserts them into the Brain.
+  Pure enrichment module. Fetches word data from a remote API and builds BrainCell structs.
+  No DB interaction occurs here.
   """
 
   alias LexiconClient
   alias BrainCell
-  alias Core.DB
 
-  @spec enrich(String.t()) ::
-          {:ok, [BrainCell.t()] | :already_known} | {:error, term()}
-
+  @spec enrich(String.t()) :: {:ok, [BrainCell.t()]} | {:error, atom()}
   def enrich(word) when is_binary(word) do
-    word_down = String.downcase(word)
-
-    if DB.has_word?(word_down) do
-      {:ok, :already_known}
-    else
-      fetch_from_api(word_down)
-    end
+    fetch_from_api(String.downcase(word))
   end
 
   def enrich(_), do: {:error, :invalid_word}
 
-  def update(word), do: fetch_from_api(word)
-    
+  @spec update(String.t()) :: {:ok, [BrainCell.t()]} | {:error, atom()}
+  def update(word), do: fetch_from_api(String.downcase(word))
+
   defp fetch_from_api(word) do
     with {:ok, %{status: 200, body: [%{"word" => w, "meanings" => meanings} | _]}} <- LexiconClient.fetch_word(word),
          cells when is_list(cells) <- build_cells(w, meanings) do
-      Enum.each(cells, &insert_cell/1)
       {:ok, cells}
     else
       {:ok, %{status: 404}} -> {:error, :not_found}
       {:error, reason} -> {:error, reason}
       _ -> {:error, :unexpected_format}
-    end
-  end
-
-  defp insert_cell(cell) do
-    opts = [on_conflict: :nothing, conflict_target: :id]
-
-    case DB.insert(cell, opts) do
-      {:ok, _} -> :ok
-      {:error, changeset} ->
-        IO.puts("⚠️ Failed to insert cell: #{cell.id}")
-        IO.inspect(changeset.errors)
     end
   end
 

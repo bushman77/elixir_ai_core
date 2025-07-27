@@ -41,30 +41,39 @@ defmodule Core.IntentMatrix do
   @doc """
   Classifies an intent based on list of token maps (%{word, pos}).
   """
-  def classify(tokens) when is_list(tokens) do
-    scores =
-      Enum.reduce(@intent_patterns, %{}, fn {intent, pattern_weights}, acc ->
-        score =
-          Enum.reduce(tokens, 0.0, fn %{pos: pos_list}, sum ->
-            sum + score_token(pos_list, pattern_weights)
-          end)
-
-        Map.put(acc, intent, score)
-      end)
-
-    {intent, confidence} = Enum.max_by(scores, fn {_intent, score} -> score end, fn -> {:unknown, 0.0} end)
-
-    if confidence >= @threshold do
-      %{intent: intent, confidence: confidence}
-    else
-      %{intent: :unknown, confidence: confidence}
-    end
-  end
-
-  defp score_token(pos_list, pattern_weights) do
-    Enum.reduce(pattern_weights, 0.0, fn {pos, weight}, acc ->
-      if pos in pos_list, do: acc + weight, else: acc
+def classify(tokens) when is_list(tokens) do
+  scores =
+    Enum.map(@intent_patterns, fn {intent, pattern_weights} ->
+      {score, keyword, dominant_pos} = score_tokens(tokens, pattern_weights)
+      {intent, %{score: score, keyword: keyword, dominant_pos: dominant_pos}}
     end)
+
+  {best_intent, %{score: best_score, keyword: kw, dominant_pos: pos}} =
+    Enum.max_by(scores, fn {_i, %{score: s}} -> s end, fn -> {:unknown, %{score: 0.0}} end)
+
+  if best_score >= @threshold do
+    %{intent: best_intent, confidence: best_score, keyword: kw, dominant_pos: pos}
+  else
+    %{intent: :unknown, confidence: best_score}
   end
+end
+
+defp score_tokens(tokens, pattern_weights) do
+  Enum.reduce(tokens, {0.0, nil, nil}, fn %{word: word, pos: pos_list}, {acc, kw, dom_pos} ->
+    best_match =
+      Enum.max_by(pattern_weights, fn {pos, weight} ->
+        if pos in pos_list, do: weight, else: 0.0
+      end, fn -> {nil, 0.0} end)
+
+    {matched_pos, weight} = best_match
+
+    if matched_pos do
+      {acc + weight, kw || word, dom_pos || matched_pos}
+    else
+      {acc, kw, dom_pos}
+    end
+  end)
+end
+
 end
 

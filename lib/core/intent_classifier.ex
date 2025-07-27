@@ -1,177 +1,116 @@
 defmodule Core.IntentClassifier do
   @moduledoc """
-  Intent classification with flexible pattern matching,
-  confidence scoring, and keyword-based boosts.
+  Classifies user intent based on part-of-speech patterns, keyword boosts, and fallback logic.
   """
 
-  @intents [:greeting, :farewell, :question, :command, :request, :statement, :affirmation, :negation, :exclamation]
-
   @patterns %{
-    greeting: [
-      [:interjection],
-      [:interjection, :pronoun],
-      [:interjection, {:optional, :pronoun}]
-    ],
-    farewell: [
-      [:interjection, :pronoun],
-      [:interjection, {:optional, :pronoun}]
-    ],
-    question: [
-      [:verb, :pronoun],
-      [:aux, :pronoun],
-      [:aux, :pronoun, :noun]
-    ],
-    command: [
-      [:verb],
-      [:verb, :noun],
-      [:verb, {:optional, :adverb}],
-      [:verb, :noun, {:optional, :adverb}]
-    ],
-    request: [
-      [:verb, :pronoun, :noun],
-      [:verb, :noun],
-      [:verb, :pronoun],
-      [:verb]
-    ],
-    statement: [
-      [:pronoun, :verb],
-      [:noun, :verb]
-    ],
-    affirmation: [
-      [:adverb],
-      [:adverb, :verb]
-    ],
-    negation: [
-      [:adverb, :verb],
-      [:adverb, :pronoun]
-    ],
-    exclamation: [
-      [:interjection, :noun]
-    ]
+    greeting: [[:interjection], [:interjection, :pronoun], [:interjection, :verb]],
+    farewell: [[:farewell], [:verb, :farewell], [:noun, :farewell]],
+    question: [[:wh_adverb, :verb], [:verb, :pronoun], [:modal, :pronoun, :verb]],
+    command: [[:verb], [:verb, :determiner, :noun]],
+    affirmation: [[:interjection], [:adverb, :adjective], [:verb, :determiner]],
+    negation: [[:adverb, :verb], [:interjection, :verb]]
   }
 
-  # Keyword boosts: keyword => {intent, boost_amount}
   @keyword_boosts %{
-    "please" => {:request, 0.4},
-    "hey" => {:greeting, 0.25},
-    "hello" => {:greeting, 0.3},
-    "hi" => {:greeting, 0.3},
-    "no" => {:negation, 0.4},
-    "never" => {:negation, 0.5},
-    "thanks" => {:affirmation, 0.3},
-    "thank" => {:affirmation, 0.3}
+    greeting: ~w(hello hi hey sup howdy greetings yo),
+    farewell: ~w(bye goodbye later cya farewell adieu),
+    question: ~w(what when where why how who whose which),
+    command: ~w(go stop get bring take open close run show give),
+    affirmation: ~w(yes yeah sure definitely ok okay absolutely indeed),
+    negation: ~w(no not never nope nah don't won't can't shouldn't)
   }
 
-  def classify(tokens) do
-    pos_lists = Enum.map(tokens, & &1.pos)
-    combos = build_combinations(pos_lists)
+  @default_confidence 0.4
+  @boost_value 0.3
 
-    # Find candidate intents & base confidence from pattern matches
-    candidates =
-      for intent <- @intents,
-          combo <- combos,
-          match_pattern?(intent, combo),
-          do: {intent, confidence(intent, combo)}
-
-    # Aggregate confidence by intent (sum all matches)
-    base_confidences = 
-      candidates
-      |> Enum.group_by(fn {intent, _} -> intent end, fn {_, conf} -> conf end)
-      |> Enum.map(fn {intent, confs} -> {intent, Enum.sum(confs)} end)
-
-    # Calculate keyword boosts for present keywords
-    boosts = calculate_keyword_boosts(tokens)
-
-    # Combine base confidence + boosts per intent
-    combined_scores = 
-      @intents
-      |> Enum.map(fn intent -> 
-        base = Keyword.get(base_confidences, intent, 0.0)
-        boost = Map.get(boosts, intent, 0.0)
-        {intent, base + boost}
-      end)
-
-    # Select intent with max combined score or :unknown if zero
-{best_intent, best_conf} =
-  combined_scores
-  |> Enum.max_by(fn {_intent, score} -> score end, fn -> {:unknown, 0.0} end)
-
-best_intent = if best_conf > 0.0, do: best_intent, else: :unknown
-keyword = extract_keyword(tokens)  # 👈 Add this line
-
-{:ok,
- %{
-   tokens: tokens,
-   intent: best_intent,
-   confidence: best_conf,
-   keyword: keyword,
-   debug: %{
-     base_confidences: base_confidences,
-     keyword_boosts: boosts,
-     combined_scores: combined_scores,
-     tokens: tokens
-   }
- }}
-end
-
-  defp calculate_keyword_boosts(tokens) do
-    # Downcase all words for case-insensitive matching
-    token_words = Enum.map(tokens, &String.downcase(&1.word))
-
-    # Find all boosts from keywords present
-    Enum.reduce(token_words, %{}, fn word, acc ->
-      case Map.get(@keyword_boosts, word) do
-        {intent, boost} ->
-          Map.update(acc, intent, boost, &(&1 + boost))
-        _ -> acc
+  def classify(tokens) when is_list(tokens) do
+    pattern_scores =
+      for {intent, patterns} <- @patterns, reduce: %{} do
+        acc ->
+          match = Enum.any?(patterns, fn pat -> matches_pattern?(pat, tokens) end)
+          if match, do: Map.put(acc, intent, @default_confidence), else: acc
       end
+
+    keyword_scores =
+      for {intent, keywords} <- @keyword_boosts, reduce: %{} do
+        acc ->
+          match = Enum.any?(tokens, fn %{word: word} -> word in keywords end)
+          if match, do: Map.put(acc, intent, @boost_value), else: acc
+      end
+
+    combined_scores =
+      Map.merge(pattern_scores, keyword_scores, fn _k, v1, v2 -> v1 + v2 end)
+
+    fallback_intent =
+      if combined_scores == %{},
+        do: fallback(tokens),
+        else: :none
+
+    {best_intent, best_conf} =
+      if fallback_intent != :none do
+        {fallback_intent, 0.1}
+      else
+        combined_scores
+        |> Enum.sort_by(fn {_k, v} -> -v end)
+        |> List.first()
+      end
+
+    keyword = extract_keyword(tokens)
+
+    source =
+      cond do
+        pattern_scores != %{} -> :pattern
+        keyword_scores != %{} -> :keyword
+        true -> :fallback
+      end
+
+    {:ok,
+     %{
+       intent: best_intent,
+       confidence: Float.round(best_conf, 3),
+       keyword: keyword,
+       mood_hint: infer_mood(best_intent, tokens),
+       fallback: best_intent == :unknown,
+       source: source,
+       pos_tags: Enum.map(tokens, & &1.pos),
+       debug: %{
+         base_confidences: pattern_scores,
+         keyword_boosts: keyword_scores,
+         combined_scores: combined_scores,
+         patterns: @patterns[best_intent] || [],
+         tokens: tokens
+       }
+     }}
+  end
+
+  defp matches_pattern?(pattern, tokens) do
+    pos_list = Enum.map(tokens, & &1.pos)
+
+    Enum.any?(0..(length(pos_list) - length(pattern)), fn offset ->
+      Enum.slice(pos_list, offset, length(pattern)) == pattern
     end)
   end
 
-  # Pattern matching with :any and {:optional, pos}
-  defp match_pattern?(intent, pos_combo) do
-    Enum.any?(@patterns[intent] || [], fn pattern ->
-      match_pattern(pattern, pos_combo)
-    end)
+  defp fallback(tokens) do
+    if Enum.any?(tokens, fn %{pos: pos} -> pos in [:interjection, :noun] end) do
+      :greeting
+    else
+      :unknown
+    end
   end
 
-  defp match_pattern([], []), do: true
-
-  defp match_pattern([{:optional, _} | _], []), do: true
-
-  defp match_pattern([{:optional, pos} | rest_pattern], [h | rest_combo]) do
-    match_pattern(rest_pattern, [h | rest_combo]) or (pos == h and match_pattern(rest_pattern, rest_combo))
+  defp extract_keyword(tokens) do
+    tokens
+    |> Enum.filter(fn t -> t.pos in [:noun, :verb, :interjection, :adjective] end)
+    |> Enum.map(& &1.word)
+    |> List.first() || "that"
   end
 
-  defp match_pattern([:any | rest_pattern], [_ | rest_combo]) do
-    match_pattern(rest_pattern, rest_combo)
-  end
-
-  defp match_pattern([p | rest_pattern], [p | rest_combo]) do
-    match_pattern(rest_pattern, rest_combo)
-  end
-
-  defp match_pattern(_, _), do: false
-
-  defp confidence(_intent, pos_combo) do
-    length(pos_combo) / 10.0
-  end
-
-  defp build_combinations(pos_lists) do
-    pos_lists
-    |> Enum.map(&Enum.uniq/1)
-    |> combine()
-  end
-
-  defp combine([head | tail]) do
-    Enum.reduce(tail, Enum.map(head, &[&1]), fn list, acc ->
-      for x <- acc, y <- list, do: x ++ [y]
-    end)
-  end
-
-  defp combine([]), do: []
-
-  defp extract_keyword([%{word: word} | _]), do: word
-  defp extract_keyword(_), do: "that"
+  defp infer_mood(:greeting, _), do: :friendly
+  defp infer_mood(:farewell, _), do: :reflective
+  defp infer_mood(:affirmation, _), do: :positive
+  defp infer_mood(:negation, _), do: :defensive
+  defp infer_mood(_, _), do: :neutral
 end
 
