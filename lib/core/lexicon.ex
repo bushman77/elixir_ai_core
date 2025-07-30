@@ -20,14 +20,6 @@ defmodule Core.Lexicon do
           ]
         }
 
-  @spec get(String.t()) :: [word_entry()] | nil
-  def get(word) when is_binary(word) do
-    Map.get(@internal_lexicon, String.downcase(word))
-  end
-
-  @spec all :: map()
-  def all, do: @internal_lexicon
-
  @internal_lexicon %{
     # Be verbs
     "be" => [%{"partOfSpeech" => "aux", "definitions" => [%{"definition" => "exist", "example" => "To be or not to be", "synonyms" => ["exist", "occur"], "antonyms" => []}]}],
@@ -58,6 +50,28 @@ defmodule Core.Lexicon do
     "will" => [%{"partOfSpeech" => "modal", "definitions" => [%{"definition" => "express future intent or willingness", "example" => "I will go", "synonyms" => [], "antonyms" => []}]}],
     "would" => [%{"partOfSpeech" => "modal", "definitions" => [%{"definition" => "express conditional intent", "example" => "I would help", "synonyms" => [], "antonyms" => []}]}]
   }
+
+
+@doc """
+Returns the part of speech (POS) for a single word if found, else :unknown.
+"""
+@spec pos_of(String.t()) :: atom()
+def pos_of(nil), do: :unknown
+
+def pos_of(word) when is_binary(word) do
+  case get(word) do
+    [%{"partOfSpeech" => pos} | _] -> String.to_atom(pos)
+    _ -> :unknown
+  end
+end
+  @spec get(String.t()) :: [word_entry()] | nil
+  def get(word) when is_binary(word) do
+    Map.get(@internal_lexicon, String.downcase(word))
+  end
+
+  @spec all :: map()
+  def all, do: @internal_lexicon
+
 
 end
 

@@ -1,127 +1,111 @@
 defmodule Core do
-  @moduledoc """
-  Central coordination module for the neuro-symbolic pipeline.
-  Handles tokenization, enrichment, intent resolution, and feedback loops.
-  """
+  require Logger
 
-  alias Core.{Tokenizer, IntentResolver, DB}
+  alias Core.{Tokenizer, IntentResolver, Token, DB}
   alias LexiconEnricher
-  alias Brain
-  alias Core.Token
 
-  @max_retry 5
+  @max_retry 2
 
-  # === ENTRY POINT ===
-  @doc """
-  Resolves an input string by:
-    - Tokenizing into n-gram phrases
-    - Enriching with BrainCell info if known
-    - Auto-enriching unknown tokens via Lexicon
-    - Recursively resolving up to #{@max_retry} tries
+  # Entry point for raw string input with retries
+  def resolve_input(input, retry_count \\ 0)
 
-  Returns:
-    {:answer, %{intent, keyword, confidence, tokens}}
-    or
-    {:error, :dictionary_missing}
-  """
-  @spec resolve_and_classify(String.t()) :: {:answer, map()} | {:error, :dictionary_missing}
-  def resolve_and_classify(input), do: resolve_and_classify(input, 0)
+  def resolve_input(input, retry_count) when retry_count < @max_retry do
+    tokens =
+      input
+      |> Tokenizer.resolve_phrases()
+      |> Enum.map(&%Token{phrase: &1})
 
-  defp resolve_and_classify(_input, @max_retry), do: {:error, :dictionary_missing}
+    phrases = Enum.map(tokens, & &1.phrase)
 
-defp resolve_and_classify(input, depth) when depth < @max_retry do
-  tokens = input |> tokenize() |> enrich_tokens()
+    case ensure_cells_started(phrases) do
+      {:ok, brain_cells} ->
+        Logger.debug("🧠 BrainCells activated: #{length(brain_cells)}")
+        {:ok, IntentResolver.resolve_intent(brain_cells)}
 
-  unknowns = find_unknown_tokens(tokens)
-
-  case unknowns do
-    [] ->
-      intent_result = IntentResolver.resolve_intent(tokens)
-      {:answer, Map.put(intent_result, :tokens, tokens)}
-
-    _unknowns ->
-      IO.puts("🔍 Retry #{depth + 1}: Still unknown tokens: #{inspect(unknowns)}")
-
-      with :ok <- enrich_unknowns(unknowns) do
-        resolve_and_classify(input, depth + 1)
-      else
-        _ -> {:error, :dictionary_missing}
-      end
-  end
-end
-
-defp resolve_and_classify(_input, @max_retry) do
-  IO.puts("❌ Max retries reached. Could not resolve all tokens.")
-  {:error, :dictionary_missing}
-end
-
-  # === TOKENIZATION ===
-
-  defp tokenize(input) do
-    Tokenizer.resolve_phrases(input)
-  end
-
-  # === ENRICHMENT ===
-
-  defp enrich_tokens(tokens) do
-    Enum.map(tokens, &ensure_token_enriched/1)
-  end
-
-  defp ensure_token_enriched(%Token{phrase: phrase} = token) do
-    case Brain.get(phrase) do
-      nil -> token
-      cell -> Token.update_from_cell(token, cell)
+      {:error, :not_found} ->
+        Logger.warning("⚠️ Enrichment failed for '#{input}': :not_found")
+        resolve_input(input, retry_count + 1)
     end
   end
 
-  defp find_unknown_tokens(tokens) do
-    tokens
-    |> Enum.filter(fn
-      %Token{pos: nil} -> true
-      %Token{pos: :unknown} -> true
-      %Token{pos: "unknown"} -> true
-      _ -> false
+  def resolve_input(_input, _retry_count), do: {:error, :max_retries_exceeded}
+
+  # Entry point for list of phrases or pre-enriched input
+  def resolve_input(input, opts) when is_list(input) and is_list(opts) do
+    case ensure_cells_started(input) do
+      {:ok, cells} ->
+        classify_and_plan(cells, opts)
+
+      {:error, reason} ->
+        IO.warn("⚠️ Could not resolve input: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  def resolve_and_classify(input) do
+    case resolve_input(input) do
+      {:ok, intent_result} -> intent_result
+      {:error, _} -> %{intent: :unknown, confidence: 0.0, reason: :unresolved}
+    end
+  end
+
+  # Ensures cells for each phrase are started and returns the list
+  def ensure_cells_started(phrases) do
+    cells =
+      phrases
+      |> Enum.flat_map(&load_or_enrich_cells/1)
+
+    Enum.each(cells, fn cell -> Brain.ensure_started(cell) end)
+
+    case cells do
+      [] -> {:error, :not_found}
+      _ -> {:ok, cells}
+    end
+  end
+
+  # Attempts to load existing cells, or enriches if not present
+  defp load_or_enrich_cells(phrase) do
+    case Brain.get_all(phrase) do
+      [] ->
+        case LexiconEnricher.enrich(phrase) do
+          {:ok, cells} ->
+IO.inspect cells
+            store_cells(cells)
+            cells
+
+          {:error, reason} ->
+            Logger.warn("⚠️ Enrichment failed for '#{phrase.phrase}': #{inspect(reason)}")
+            []
+        end
+
+      existing -> existing
+    end
+  end
+
+  # Stores cells to DB and brain registry
+  defp store_cells(cells) do
+    Enum.each(cells, fn cell ->
+      normalized = normalize_cell(cell)
+
+      unless DB.cell_exists?(normalized.id) do
+        DB.insert_cell!(normalized)
+      end
+
+      Brain.store(normalized)
     end)
-    |> Enum.map(& &1.phrase)
-    |> Enum.uniq()
   end
 
-  defp enrich_unknowns(phrases) do
-    results =
-      Enum.map(phrases, fn phrase ->
-        with {:ok, cells} <- LexiconEnricher.enrich(phrase),
-             {:ok, _} <- memorize(cells) do
-          IO.inspect(cells, label: "🧬 Enriched brain cells for #{phrase}")
-          :ok
-        else
-          _ -> {:error, phrase}
-        end
-      end)
-
-    if Enum.any?(results, &match?({:error, _}, &1)), do: {:error, :fail}, else: :ok
+  # Normalize any loaded or enriched BrainCell struct
+  defp normalize_cell(%BrainCell{} = cell) do
+    cell
+    |> Map.from_struct()
+    |> Map.drop([:__meta__, :__struct__])
+    |> then(&struct(BrainCell, &1))
   end
 
-  # === MEMORY PERSISTENCE ===
-
-  @spec memorize([BrainCell.t()]) :: {:ok, [BrainCell.t()]} | {:error, any()}
-  defp memorize(cells) when is_list(cells) do
-    results =
-      Enum.map(cells, fn cell ->
-        if DB.cell_exists?(cell.id) do
-          :ok
-        else
-          cell
-          |> normalize_cell()
-          |> DB.insert_cell!()
-          |> then(fn _ -> :ok end)
-        end
-      end)
-
-    if Enum.all?(results, &(&1 == :ok)), do: {:ok, cells}, else: {:error, :db_failure}
-  end
-
-  defp normalize_cell(%BrainCell{word: word} = cell) do
-    %BrainCell{cell | word: String.downcase(word)}
+  # Placeholder for downstream planner
+  defp classify_and_plan(cells, _opts) do
+    %{tokens: cells, intent: :placeholder}
   end
 end
 

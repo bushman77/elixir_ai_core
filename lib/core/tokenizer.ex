@@ -50,15 +50,17 @@ defmodule Core.Tokenizer do
     |> Enum.uniq_by(& &1.phrase)
   end
 
-  defp build_phrases(words, n) do
-    Enum.chunk_every(words, n, 1, :discard)
-    |> Enum.with_index()
-    |> Enum.map(fn {chunk, index} ->
-      %Token{
-        phrase: Enum.join(chunk, " "),
-        index: index
-      }
-    end)
-  end
+defp build_phrases(words, n) do
+  Enum.chunk_every(words, n, 1, :discard)
+  |> Enum.with_index()
+  |> Enum.map(fn {chunk, index} ->
+    %Token{
+      phrase: Enum.join(chunk, " "),
+      index: index
+    }
+  end)
+end
+
+
 end
 

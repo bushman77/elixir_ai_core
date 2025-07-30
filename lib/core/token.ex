@@ -1,19 +1,11 @@
 defmodule Core.Token do
   @moduledoc """
-  Represents a token or phrase unit with optional semantic enrichment.
+  Represents a tokenized phrase or word from user input.
   """
 
   defstruct [
     :phrase,
-    :index,
-    pos: nil,
-    keyword: nil,
-    intent: nil,
-    confidence: nil,
-mood: nil,
-enriched_from: nil,
-embedded_vector: nil
-
+    :index
   ]
 end
 

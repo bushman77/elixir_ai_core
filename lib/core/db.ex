@@ -30,6 +30,8 @@ defmodule Core.DB do
     exists?(query)
   end
 
+def get_cells_for_phrase(phrase), do: get_braincells_by_word(phrase)
+
 @doc """
 Gets all brain cells for a given word (downcased).
 Returns an empty list if none found.
@@ -41,6 +43,14 @@ end
 
 def insert_cell!(%BrainCell{} = cell) do
     __MODULE__.insert!(cell)
+  end
+
+def insert_all(cells) do
+    Enum.each(cells, fn cell ->
+      unless cell_exists?(cell.id) do
+        insert_cell!(cell)
+      end
+    end)
   end
 
 end

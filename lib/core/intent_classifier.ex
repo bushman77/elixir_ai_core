@@ -1,6 +1,6 @@
 defmodule Core.IntentClassifier do
   @moduledoc """
-  Classifies user intent based on part-of-speech patterns, keyword boosts, and fallback logic.
+  Classifies user intent based on part-of-speech patterns and keyword boosts.
   """
 
   @patterns %{
@@ -23,94 +23,81 @@ defmodule Core.IntentClassifier do
 
   @default_confidence 0.4
   @boost_value 0.3
+  @threshold 0.5
 
+  @doc """
+  Returns a map with `:intent`, `:confidence`, `:keyword`, and `:dominant_pos`.
+  """
   def classify(tokens) when is_list(tokens) do
-    pattern_scores =
-      for {intent, patterns} <- @patterns, reduce: %{} do
-        acc ->
-          match = Enum.any?(patterns, fn pat -> matches_pattern?(pat, tokens) end)
-          if match, do: Map.put(acc, intent, @default_confidence), else: acc
-      end
+IO.inspect Brain.get_state
+    base_scores =
+      Enum.map(@patterns, fn {intent, patterns} ->
+        matched = Enum.any?(patterns, &matches_pattern?(&1, tokens))
+        score = if matched, do: @default_confidence, else: 0.0
+        {intent, score}
+      end)
 
-    keyword_scores =
-      for {intent, keywords} <- @keyword_boosts, reduce: %{} do
-        acc ->
-          match = Enum.any?(tokens, fn %{word: word} -> word in keywords end)
-          if match, do: Map.put(acc, intent, @boost_value), else: acc
-      end
+    boosted_scores =
+      Enum.map(base_scores, fn {intent, score} ->
+        boost = boost_from_keywords(intent, tokens)
+        {intent, score + boost}
+      end)
 
-    combined_scores =
-      Map.merge(pattern_scores, keyword_scores, fn _k, v1, v2 -> v1 + v2 end)
-
-    fallback_intent =
-      if combined_scores == %{},
-        do: fallback(tokens),
-        else: :none
-
-    {best_intent, best_conf} =
-      if fallback_intent != :none do
-        {fallback_intent, 0.1}
-      else
-        combined_scores
-        |> Enum.sort_by(fn {_k, v} -> -v end)
-        |> List.first()
-      end
+    {best_intent, best_score} =
+      Enum.max_by(boosted_scores, fn {_intent, score} -> score end, fn -> {:unknown, 0.0} end)
 
     keyword = extract_keyword(tokens)
+    dominant_pos = extract_dominant_pos(tokens)
 
-    source =
-      cond do
-        pattern_scores != %{} -> :pattern
-        keyword_scores != %{} -> :keyword
-        true -> :fallback
-      end
-
-    {:ok,
-     %{
-       intent: best_intent,
-       confidence: Float.round(best_conf, 3),
-       keyword: keyword,
-       mood_hint: infer_mood(best_intent, tokens),
-       fallback: best_intent == :unknown,
-       source: source,
-       pos_tags: Enum.map(tokens, & &1.pos),
-       debug: %{
-         base_confidences: pattern_scores,
-         keyword_boosts: keyword_scores,
-         combined_scores: combined_scores,
-         patterns: @patterns[best_intent] || [],
-         tokens: tokens
-       }
-     }}
+    if best_score >= @threshold do
+      %{
+        intent: best_intent,
+        confidence: best_score,
+        keyword: keyword,
+        dominant_pos: dominant_pos
+      }
+    else
+      %{
+        intent: :unknown,
+        confidence: best_score,
+        keyword: keyword,
+        dominant_pos: dominant_pos
+      }
+    end
   end
 
   defp matches_pattern?(pattern, tokens) do
     pos_list = Enum.map(tokens, & &1.pos)
-
     Enum.any?(0..(length(pos_list) - length(pattern)), fn offset ->
       Enum.slice(pos_list, offset, length(pattern)) == pattern
     end)
   end
 
-  defp fallback(tokens) do
-    if Enum.any?(tokens, fn %{pos: pos} -> pos in [:interjection, :noun] end) do
-      :greeting
-    else
-      :unknown
-    end
+  defp boost_from_keywords(intent, tokens) do
+    words = Enum.map(tokens, & &1.word)
+    boost =
+      Enum.any?(words, fn word ->
+        String.downcase(word) in Map.get(@keyword_boosts, intent, [])
+      end)
+
+    if boost, do: @boost_value, else: 0.0
   end
 
   defp extract_keyword(tokens) do
     tokens
-    |> Enum.filter(fn t -> t.pos in [:noun, :verb, :interjection, :adjective] end)
-    |> Enum.map(& &1.word)
-    |> List.first() || "that"
+    |> Enum.find(fn t -> t.pos in [:noun, :verb, :interjection, :adjective] end)
+    |> case do
+      nil -> "that"
+      token -> token.word
+    end
   end
 
-  defp infer_mood(:greeting, _), do: :friendly
-  defp infer_mood(:farewell, _), do: :reflective
-  defp infer_mood(:affirmation, _), do: :positive
-  defp infer_mood(:negation, _), do: :defensive
-  defp infer_mood(_, _), do: :neutral
+  defp extract_dominant_pos(tokens) do
+    tokens
+    |> Enum.flat_map(&List.wrap(&1.pos))
+    |> Enum.frequencies()
+    |> Enum.max_by(fn {_pos, count} -> count end, fn -> {:unknown, 0} end)
+    |> elem(0)
+  end
 end
 

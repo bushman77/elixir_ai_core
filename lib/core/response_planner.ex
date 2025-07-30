@@ -1,26 +1,57 @@
 defmodule Core.ResponsePlanner do
   @moduledoc """
-  Chooses a response based on intent, keyword, confidence, and context.
+  Chooses a response based on intent, keyword, confidence, and optionally mood or prior context.
   """
 
   alias Brain
   alias BrainCell
-  alias PhraseGenerator
   alias Core.MemoryCore
+  alias PhraseGenerator
 
   @high 0.6
   @low 0.3
 
-  # === Primary entry point ===
-  def plan(%{intent: :greeting, confidence: conf}) when conf >= @high do
-    "Hey there! 👋 How can I assist you today?"
+  # === Entry Point ===
+  def plan(%{intent: intent, cell: cell, confidence: conf}) when not is_nil(cell) do
+    plan_with_cell(intent, cell, conf)
   end
 
-  def plan(%{intent: :farewell, confidence: conf}) when conf >= @low do
-    "Goodbye for now. Take care out there."
+  def plan(%{intent: intent, keyword: word, confidence: conf}) do
+    plan_with_keyword(intent, word, conf)
   end
 
-  def plan(%{intent: :question, keyword: word, confidence: conf}) do
+  def plan(_), do: "Hmm… I didn’t quite understand that."
+
+  # === Intent Routing with Cell ===
+  defp plan_with_cell(:greeting, _cell, conf) when conf >= @high,
+    do: "Hey there! 👋 How can I assist you today?"
+
+  defp plan_with_cell(:farewell, _cell, conf) when conf >= @low,
+    do: "Goodbye for now. Take care out there."
+
+  defp plan_with_cell(:define, %BrainCell{word: word, definition: defn}, conf) when conf > @low,
+    do: "#{word}: #{defn}"
+
+  defp plan_with_cell(:reflect, %BrainCell{word: word}, conf) when conf > @low do
+    phrase = PhraseGenerator.generate_phrase(word, mood: :reflective)
+    "Hmm… #{word} makes me think of: #{phrase}"
+  end
+
+  defp plan_with_cell(:recall, %BrainCell{word: word}, conf) when conf > @low do
+    phrase = PhraseGenerator.generate_phrase(word, mood: :nostalgic)
+    "I remember something like: #{phrase}"
+  end
+
+  defp plan_with_cell(:unknown, %BrainCell{word: word}, _conf) do
+    phrase = PhraseGenerator.generate_phrase(word, mood: :curious)
+    "I'm not quite sure about that… but '#{word}' brings to mind: #{phrase}"
+  end
+
+  defp plan_with_cell(intent, %BrainCell{word: word}, conf),
+    do: fallback_response(intent, word, conf)
+
+  # === Intent Routing with Keyword Only (legacy fallback) ===
+  defp plan_with_keyword(:question, word, conf) do
     case {word, conf} do
       {"why", c} when c > @high -> "Why questions are my favorite! Let’s explore."
       {"how", c} when c > @low -> "How things work can be fascinating — what specifically?"
@@ -30,34 +61,10 @@ defmodule Core.ResponsePlanner do
     end
   end
 
-  def plan(%{intent: :reflect, keyword: word, confidence: conf}) when conf > @low do
-    phrase = PhraseGenerator.generate_phrase(word, mood: :reflective)
-    "Hmm… #{word} makes me think of: #{phrase}"
-  end
+  defp plan_with_keyword(intent, word, conf) when conf < @low,
+    do: "I noticed the intent `#{intent}` with `#{word}`, but I'm unsure. Want to clarify?"
 
-  def plan(%{intent: :recall, keyword: word, confidence: conf}) when conf > @low do
-    phrase = PhraseGenerator.generate_phrase(word, mood: :nostalgic)
-    "I remember something like: #{phrase}"
-  end
-
-  def plan(%{intent: :define, keyword: word, confidence: conf}) when conf > @low do
-    case Brain.get(word) do
-      %BrainCell{definition: defn} -> "#{word}: #{defn}"
-      _ -> "I haven’t learned that word yet."
-    end
-  end
-
-  def plan(%{intent: :unknown, keyword: word}) do
-    phrase = PhraseGenerator.generate_phrase(word, mood: :curious)
-    "I'm not quite sure about that… but '#{word}' brings to mind: #{phrase}"
-  end
-
-  # === Context-aware fallback ===
-  def plan(%{intent: intent, keyword: word, confidence: conf}) when conf < @low do
-    "I noticed the intent `#{intent}` with `#{word}`, but I'm unsure. Want to clarify?"
-  end
-
-  def plan(%{intent: intent, keyword: word}) do
+  defp plan_with_keyword(intent, word, _conf) do
     recent = MemoryCore.recent(1)
 
     case recent do
@@ -70,21 +77,18 @@ defmodule Core.ResponsePlanner do
             "You mentioned \"#{word}\" again — here’s a fresh take."
 
           true ->
-            fallback_response(intent, word)
+            fallback_response(intent, word, nil)
         end
 
       _ ->
-        fallback_response(intent, word)
+        fallback_response(intent, word, nil)
     end
   end
 
-  def plan(_), do: "Hmm… I didn’t quite understand that."
+  # === Fallback ===
+  defp fallback_response(intent, nil, _), do: "I picked up `#{intent}`, but I need a bit more to go on."
 
-  # === Helpers ===
-  defp fallback_response(intent, nil),
-    do: "I picked up `#{intent}`, but I need a bit more to go on."
-
-  defp fallback_response(intent, word),
+  defp fallback_response(intent, word, _),
     do: "I noticed `#{intent}` and `#{word}`, but couldn’t handle that combo just yet."
 end
 

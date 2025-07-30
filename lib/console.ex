@@ -1,11 +1,11 @@
 defmodule Console do
   use GenServer
-  import Ecto.Query
 
-  alias Core.{Tokenizer, DB}
-  alias LexiconEnricher
+  import Ecto.Query
+  alias Core.{Tokenizer, DB, Brain}
   alias Core
-  alias Brain
+  alias LexiconEnricher
+  alias BrainCell
 
   @moduledoc """
   Interactive console for AI Brain.
@@ -15,11 +15,10 @@ defmodule Console do
   """
 
   # -- Public API --
-
   def start_link(_opts), do: GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
   def start, do: GenServer.cast(__MODULE__, :prompt)
 
-  # -- GenServer Callbacks --
+  # -- GenServer Lifecycle --
 
   def init(:ok) do
     IO.puts("🧠 AI Brain Console started. Type anything to begin.")
@@ -30,7 +29,7 @@ defmodule Console do
   def handle_cast(:prompt, state) do
     case IO.gets("> ") do
       nil ->
-        IO.puts("\nGoodbye!")
+        IO.puts("\n👋 Goodbye!")
         {:stop, :normal, state}
 
       input ->
@@ -39,9 +38,9 @@ defmodule Console do
         {:noreply, state}
     end
   rescue
-    exception ->
-      IO.puts("↳ #{Exception.message(exception)}")
-      IO.inspect(__STACKTRACE__)
+    error ->
+      IO.puts("⚠️ Error: #{Exception.message(error)}")
+      IO.inspect(__STACKTRACE__, label: "Stacktrace")
       GenServer.cast(self(), :prompt)
       {:noreply, state}
   end
@@ -49,69 +48,82 @@ defmodule Console do
   # -- Input Handling --
 
   defp handle_input(""), do: :ok
-
   defp handle_input(".enrich"), do: IO.puts("Usage: .enrich <word>")
-
-  defp handle_input(".enrich " <> word) do
-    case LexiconEnricher.update(String.trim(word)) do
-      {:ok, _cells} ->
-        entries = DB.all(from b in BrainCell, where: b.word == ^word)
-
-        if entries == [] do
-          IO.puts("⚠️ No brain cells found for '#{word}' after enrichment.")
-        else
-          IO.puts("✅ Enriched '#{word}' with:")
-          Enum.each(entries, fn
-            %BrainCell{pos: pos, definition: defn} ->
-              IO.puts(" • [#{pos}] #{defn}")
-            other ->
-              IO.puts("⚠️ Unexpected DB entry: #{inspect(other)}")
-          end)
-        end
-
-      {:error, :not_found} ->
-        IO.puts("❌ Word '#{word}' not found in online dictionary.")
-
-      {:error, reason} ->
-        IO.puts("⚠️ Enrichment failed: #{inspect(reason)}")
-    end
-  end
+  defp handle_input(".enrich " <> word), do: enrich_word(String.trim(word))
 
   defp handle_input("eval " <> code) do
     try do
       {result, _binding} = Code.eval_string(code)
       IO.inspect(result, label: "🧪 Eval Result")
     rescue
-      error -> IO.puts("❌ Eval Error: #{inspect(error)}")
+      error -> IO.puts("❌ Eval Error: #{Exception.message(error)}")
     end
   end
 
-defp handle_input(input) do
-  case Core.resolve_and_classify(input) do
-    {:answer, %{intent: intent, keyword: keyword, confidence: confidence, tokens: tokens}} ->
-      IO.puts("🧠 Intent Classification:")
-      IO.puts(" → Intent: #{intent}")
-      IO.puts(" → Keyword: #{keyword}")
-      IO.puts(" → Confidence: #{Float.round(confidence, 2)}")
-      IO.puts("🧠 Tokens:")
-      Enum.each(tokens, &print_token/1)
+  defp handle_input(input) do
+Core.resolve_and_classify(input)
+|> IO.inspect()
+    case Core.resolve_and_classify(input) do
+      {:answer, %{intent: intent, keyword: keyword, confidence: confidence} = full} ->
+        IO.puts("🧠 Intent Classification:")
+        IO.puts(" → Intent: #{intent}")
+        IO.puts(" → Keyword: #{keyword}")
+        IO.puts(" → Confidence: #{Float.round(confidence, 2)}")
 
-    {:error, :dictionary_missing} ->
-      IO.puts("❌ Could not resolve unknown words. Try enriching the lexicon.")
+        case Map.get(full, :tokens) do
+          nil ->
+            IO.puts("⚠️ No tokens available in classifier output.")
 
-    {:error, reason} ->
-      IO.puts("❌ Failed to classify input: #{inspect(reason)}")
+          tokens ->
+            IO.puts("🧠 Tokens:")
+            Enum.each(tokens, &print_token/1)
+        end
+
+      {:error, :dictionary_missing} ->
+        IO.puts("❌ Could not resolve unknown words. Try enriching the lexicon.")
+
+      {:error, reason} ->
+        IO.puts("❌ Failed to classify input: #{inspect(reason)}")
+
+      other ->
+        IO.puts("⚠️ Unexpected classifier output: #{inspect(other)}")
+    end
   end
-end
 
-  # -- Helpers --
+  # -- Output Helpers --
 
-  defp print_token(%{word: word, pos: pos, keyword: keyword, intent: intent, confidence: conf}) do
-    IO.puts(" • #{word} [#{pos}]  → intent: #{intent}, keyword: #{keyword}, conf: #{conf}")
+  defp print_token(%{word: word, pos: pos, keyword: kw, intent: i, confidence: c})
+       when is_binary(word) and is_binary(pos) do
+    IO.puts(" • #{word} [#{pos}] → intent: #{i}, keyword: #{kw}, conf: #{Float.round(c, 2)}")
   end
 
-  defp print_token(token) do
-    IO.puts(" • #{inspect(token)}")
+  defp print_token(%BrainCell{word: word, pos: pos} = cell) do
+    IO.puts(" • #{word} [#{pos}] → BrainCell (ID: #{cell.id})")
+  end
+
+  defp print_token(other) do
+    IO.puts(" • #{inspect(other)}")
+  end
+
+  defp print_enriched(%BrainCell{pos: pos, definition: defn}) do
+    IO.puts(" • [#{pos}] #{defn}")
+  end
+
+  defp print_enriched(other) do
+    IO.puts("⚠️ Unexpected DB entry: #{inspect(other)}")
+  end
+
+  # -- Lexicon Enrichment --
+
+  defp enrich_word(word) do
+    case LexiconEnricher.enrich(word) do
+      {:ok, cells} when is_list(cells) ->
+        IO.puts("📚 Enriched entries for '#{word}':")
+        Enum.each(cells, &print_enriched/1)
+
+      {:error, reason} ->
+        IO.puts("❌ Failed to enrich: #{inspect(reason)}")
+    end
   end
 end
 
