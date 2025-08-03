@@ -1,7 +1,7 @@
 defmodule Brain do
   use GenServer
 
-  alias Core.DB
+alias Core.{SemanticInput, Token, DB}
   alias BrainCell
   alias LexiconEnricher
 
@@ -19,8 +19,30 @@ defmodule Brain do
     GenServer.call(__MODULE__, {:attention, token_list})
   end
 
-  @doc "Fetches a BrainCell struct directly from the DB by ID."
-  def get(id), do: DB.get(BrainCell, id)
+def get_all_phrases do
+  Brain.get_all()
+  |> Enum.map(& &1.word)
+  |> Enum.filter(&String.contains?(&1, " "))
+end
+
+
+def get_cells(token) do
+  GenServer.call(Brain, {:get_cells, token})
+end
+
+def link_cells(%SemanticInput{token_structs: tokens} = input) do
+    cells =
+      tokens
+      |> Enum.map(&BrainCell.get(&1.phrase))
+      |> Enum.filter(& &1) # remove nils
+
+    %{input | cells: cells}
+  end
+
+@doc "Fetches a BrainCell struct directly from the DB by ID or Token."
+def get(%Core.Token{phrase: phrase}), do: get(phrase)
+def get(id) when is_binary(id), do: DB.get(BrainCell, id)
+def get(_), do: nil  # fallback for unsupported types
 
   @doc """
   Gets or starts BrainCell processes for a given word.
@@ -83,6 +105,18 @@ defmodule Brain do
 
     {:reply, found_cells, %{state | attention: new_attention}}
   end
+
+@impl true
+def handle_call({:get_cells, token}, _from, state) do
+ cells =
+ state.active_cells
+ |> Map.keys()
+ |> Enum.filter(fn key ->
+   String.starts_with?(key, "#{token.phrase}|")
+ end)
+ |> Enum.filter(& &1)  # Remove any nils
+  {:reply, cells, state}
+end
 
   @impl true
   def handle_call(:get_state, _from, state), do: {:reply, state, state}
@@ -166,7 +200,7 @@ def store(_), do: :ok
 
 
 def ensure_cell_started(%BrainCell{id: id} = cell) do
-  case Registry.lookup(Brain.Registry, id) do
+  case Registry.lookup(Core.Registry, id) do
     [] ->
       {:ok, _pid} = BrainCell.start_link(cell)
     _ ->

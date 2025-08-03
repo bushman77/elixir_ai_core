@@ -20,7 +20,6 @@ defmodule LexiconEnricher do
   defp fetch_from_api(word) do
     with {:ok, %{status: 200, body: [%{"word" => w, "meanings" => meanings} | _]}} <- LexiconClient.fetch_word(word),
          cells when is_list(cells) <- build_cells(w, meanings) do
-IO.inspect :kkkkkkkkkkkkkk
       {:ok, cells}
     else
       {:ok, %{status: 404}} -> {:error, :not_found}
@@ -30,6 +29,7 @@ IO.inspect :kkkkkkkkkkkkkk
   end
 
   defp build_cells(word, meanings) do
+    synonyms = (Enum.at( meanings, 0))["synonyms"]
     Enum.flat_map(meanings, fn %{"partOfSpeech" => pos, "definitions" => defs} ->
       Enum.with_index(defs, 1)
       |> Enum.map(fn {%{"definition" => defn} = defmap, idx} ->
@@ -41,7 +41,7 @@ IO.inspect :kkkkkkkkkkkkkk
           pos: pos,
           definition: defn || "",
           example: defmap["example"] || "",
-          synonyms: defmap["synonyms"] || [],
+          synonyms: synonyms,
           antonyms: defmap["antonyms"] || [],
           semantic_atoms: atoms,
           type: nil,

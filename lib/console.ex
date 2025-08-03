@@ -6,6 +6,7 @@ defmodule Console do
   alias Core
   alias LexiconEnricher
   alias BrainCell
+alias Core.SemanticInput
 
   @moduledoc """
   Interactive console for AI Brain.
@@ -61,23 +62,15 @@ defmodule Console do
   end
 
   defp handle_input(input) do
-Core.resolve_and_classify(input)
-|> IO.inspect()
-    case Core.resolve_and_classify(input) do
-      {:answer, %{intent: intent, keyword: keyword, confidence: confidence} = full} ->
-        IO.puts("🧠 Intent Classification:")
-        IO.puts(" → Intent: #{intent}")
-        IO.puts(" → Keyword: #{keyword}")
-        IO.puts(" → Confidence: #{Float.round(confidence, 2)}")
+case Core.resolve_and_classify(input) do
+  {:ok, %SemanticInput{} = semantic} ->
+    IO.puts("🧠 Intent Classification:")
+    IO.puts(" → Intent: #{semantic.intent}")
+    IO.puts(" → Keyword: #{semantic.keyword}")
+    IO.puts(" → Confidence: #{Float.round(semantic.confidence, 2)}")
 
-        case Map.get(full, :tokens) do
-          nil ->
-            IO.puts("⚠️ No tokens available in classifier output.")
-
-          tokens ->
-            IO.puts("🧠 Tokens:")
-            Enum.each(tokens, &print_token/1)
-        end
+    IO.puts("🧠 Tokens:")
+    Enum.each(semantic.token_structs || semantic.tokens, &print_token/1)
 
       {:error, :dictionary_missing} ->
         IO.puts("❌ Could not resolve unknown words. Try enriching the lexicon.")

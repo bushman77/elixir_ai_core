@@ -1,66 +1,48 @@
 defmodule Core.Tokenizer do
-  @moduledoc """
-  Converts input sentences into structured token objects (phrases).
-  Generates n-gram tokens up to a specified length and prepares for enrichment.
-  """
+  alias Core.{Token, SemanticInput}
 
-  alias Core.Token
+  def tokenize(%SemanticInput{sentence: sentence} = semantic) do
+    phrase_list = Brain.get_all_phrases() |> Enum.map(&String.downcase/1)
 
-  @max_ngram_length 3
+    words = sentence
+            |> String.downcase()
+            |> String.split()
 
-  @doc """
-  Takes a raw sentence and returns a list of n-gram `%Token{}` structs.
-  """
-  def resolve_phrases(sentence) when is_binary(sentence) do
-    sentence
-    |> clean()
-    |> build_ngrams()
-  end
+    merged = merge_phrases(words, phrase_list)
 
-  @doc """
-  Breaks a phrase into all smaller sub-phrases of two or more words.
-  """
-  def fragment_phrases(phrase) when is_binary(phrase) do
-    words = String.split(phrase)
-
-    2..(length(words))
-    |> Enum.flat_map(fn size ->
-      Enum.chunk_every(words, size, 1, :discard)
-      |> Enum.map(&Enum.join(&1, " "))
+    tokens = Enum.with_index(merged, fn phrase, index ->
+      %Token{
+        phrase: phrase,
+        position: index,
+        source: :user
+      }
     end)
-    |> Enum.uniq()
+
+    %{semantic | tokens: Enum.map(tokens, & &1.phrase), token_structs: tokens}
   end
 
-  # -- PRIVATE FUNCTIONS --
-
-  defp clean(text) do
-    text
-    |> String.downcase()
-    |> String.replace(~r/[^a-z0-9\s]/u, "")
-    |> String.trim()
+  # merges known phrases, returns ["how are you", "doing"] from ["how", "are", "you", "doing"]
+  defp merge_phrases(words, phrases) do
+    merge_phrases(words, phrases, [])
   end
 
-  defp build_ngrams(sentence) do
-    words = String.split(sentence, " ", trim: true)
-    max_len = min(@max_ngram_length, length(words))
+  defp merge_phrases([], _phrases, acc), do: Enum.reverse(acc)
 
-    1..max_len
-    |> Enum.reverse()
-    |> Enum.flat_map(&build_phrases(words, &1))
-    |> Enum.uniq_by(& &1.phrase)
+  defp merge_phrases(words, phrases, acc) do
+    matched =
+      Enum.find(phrases, fn phrase ->
+        phrase_words = String.split(phrase)
+        Enum.take(words, length(phrase_words)) == phrase_words
+      end)
+
+    if matched do
+      skip = String.split(matched) |> length()
+      rest = Enum.drop(words, skip)
+      merge_phrases(rest, phrases, [matched | acc])
+    else
+      [head | tail] = words
+      merge_phrases(tail, phrases, [head | acc])
+    end
   end
-
-defp build_phrases(words, n) do
-  Enum.chunk_every(words, n, 1, :discard)
-  |> Enum.with_index()
-  |> Enum.map(fn {chunk, index} ->
-    %Token{
-      phrase: Enum.join(chunk, " "),
-      index: index
-    }
-  end)
-end
-
-
 end
 

@@ -1,263 +1,95 @@
 defmodule Core.POS do
   @moduledoc """
-  Part-of-speech utilities and intent classification based on POS patterns and fallback keyword matching.
-
-  Supports intent categories like:
-    - question
-    - greeting
-    - command
-    - statement
-    - request
-    - negation
-    - affirmation
-    - exclamation
+  Handles part-of-speech tagging, multiword phrase merging, and POS normalization.
   """
 
-  require Logger
+  alias Core.Token
+  alias Brain
 
-  @greeting_words ~w(hello hi hey greetings welcome)
-  @affirmative_words ~w(yes yeah yup sure certainly absolutely)
-
-  @intent_patterns %{
-    question: [
-      ["adverb", "verb", "pronoun"],
-      ["wh_pronoun", "verb", "noun"],
-      ["wh_determiner", "noun", "verb"],
-      ["verb", "pronoun"],
-      ["aux", "pronoun", "verb"],
-      ["modal", "pronoun", "base_verb"],
-      ["preposition", "noun", "verb"],
-      ["wh_adverb", "aux", "subject"],
-      ["interjection", "verb", "pronoun"],
-      ["pronoun", "verb", "pronoun", "verb"]
-    ],
-    command: [
-      ["verb"],
-      ["verb", "noun"],
-      ["verb", "object"],
-      ["verb", "preposition", "noun"],
-      ["verb", "pronoun"],
-      ["modal", "verb"]
-    ],
-    statement: [
-      ["pronoun", "verb"],
-      ["noun", "verb"],
-      ["subject", "verb", "object"],
-      ["pronoun", "aux", "verb"],
-      ["noun", "aux", "verb"],
-      ["determiner", "noun", "verb"]
-    ],
-    greeting: [
-      ["interjection"],
-      ["interjection", "pronoun"],
-      ["interjection", "noun"]
-    ],
-    exclamation: [
-      ["interjection", "exclamation"],
-      ["adjective", "exclamation"],
-      ["interjection", "adjective"]
-    ],
-    negation: [
-      ["pronoun", "aux", "negation", "verb"],
-      ["noun", "aux", "negation", "verb"],
-      ["aux", "negation", "verb"]
-    ],
-    request: [
-      ["modal", "pronoun", "verb"],
-      ["verb", "pronoun", "please"],
-      ["please", "verb", "noun"]
-    ],
-    affirmation: [
-      ["yes"],
-      ["affirmative"],
-      ["pronoun", "verb", "noun"],
-      ["pronoun", "aux", "verb"],
-      ["pronoun", "modal", "base_verb"],
-      ["interjection", "affirmative"],
-      ["pronoun", "verb", "affirmative"]
-    ]
-  }
-
-@multiword_dict %{
-  {"take", "care"} => %{word: "take care", pos: ["verb"]},
-  {"look", "after"} => %{word: "look after", pos: ["verb"]},
-  {"give", "up"} => %{word: "give up", pos: ["verb"]},
-  {"kick", "the bucket"} => %{word: "kick the bucket", pos: ["verb", "idiom"]}
-  # Add more as needed
-}
-
-def merge_multiword_phrases(tokens) do
-  do_merge(tokens, [])
-end
-
-defp do_merge([t1, t2 | rest], acc) do
-  key = {t1.word, t2.word}
-
-  case @multiword_dict[key] do
-    nil ->
-      do_merge([t2 | rest], [t1 | acc])
-
-    merged ->
-      do_merge(rest, [merged | acc])
-  end
-end
-
-defp do_merge([t], acc), do: Enum.reverse([t | acc])
-defp do_merge([], acc), do: Enum.reverse(acc)
-
+  @multiword_cutoff 4
 
   @doc """
-  Classifies a list of token maps (with `:pos` lists) to determine sentence intent.
+  Enriches token structs with POS data from Brain.
   """
-  def classify_input(tokens) when is_list(tokens) do
-    pos_lists = Enum.map(tokens, & &1.pos)
-    combos = cartesian_product(pos_lists)
+  def tag_token_structs(tokens) do
+    Enum.map(tokens, fn %Token{text: word} = token ->
+      case Brain.get(word) do
+        %BrainCell{pos: pos} when is_list(pos) ->
+          %{token | pos: normalize_all_pos(pos)}
 
-    IO.inspect(tokens, label: "🔍 Tokens before classification")
-    IO.inspect(pos_lists, label: "🔠 POS Lists")
-    IO.inspect(combos, label: "🧪 All POS Combos")
+        %BrainCell{pos: pos} ->
+          %{token | pos: normalize_all_pos([pos])}
 
-    found_intent =
-      Enum.find_value(Map.keys(@intent_patterns), :unknown, fn intent ->
-        patterns = Map.get(@intent_patterns, intent, [])
-
-        IO.puts("⏳ Trying intent: #{intent}")
-        Enum.each(patterns, fn pattern ->
-          if pattern in combos, do: IO.puts("✅ Matched pattern: #{inspect(pattern)} for #{intent}")
-        end)
-
-        Enum.find(patterns, fn pattern -> pattern in combos end) && intent
-      end)
-
-    intent =
-      case found_intent do
-        :command -> if contains_interjection?(pos_lists), do: :greeting, else: :command
-        :unknown -> fallback_intent(:unknown, tokens)
-        _ -> found_intent
+        _ ->
+          %{token | pos: ["unknown"]}
       end
-
-    Logger.debug("[IntentClassifier] Chose intent: #{inspect(intent)} from tokens: #{inspect(tokens)}")
-
-    {:answer, %{intent: intent, tokens: tokens}}
+    end)
   end
 
   @doc """
-  Classifies intent from a list of word/POS tuples (used for sentence-level analysis).
-  Also triggers firing of brain cells.
+  Normalizes all POS tags to lowercase atoms.
   """
-  def intent_from_word_pos_list(pos_lists) when is_list(pos_lists) do
-    combos =
-      cartesian_product(pos_lists)
-      |> Enum.map(fn tuple_list ->
-        Enum.map(tuple_list, fn
-          {_, pos} -> pos
-          _ -> nil
-        end)
-      end)
-
-    Brain.maybe_fire_cells(pos_lists)
-
-    found_intent =
-      Enum.find_value(@intent_patterns, :unknown, fn {intent, patterns} ->
-        Enum.find(patterns, fn pattern -> pattern in combos end) && intent
-      end)
-
-    intent =
-      case found_intent do
-        :command -> if contains_interjection?(pos_lists), do: :greeting, else: :command
-        :unknown -> fallback_intent(:unknown, pos_lists)
-        _ -> found_intent
-      end
-
-    intent
+  def normalize_all_pos(pos_list) do
+    pos_list
+    |> Enum.map(&normalize_pos/1)
+    |> Enum.uniq()
   end
 
-  defp contains_interjection?(pos_lists) do
-    Enum.any?(List.flatten(pos_lists), &(&1 == "interjection"))
+  def normalize_pos(pos) when is_binary(pos), do: pos |> String.downcase() |> String.to_atom()
+  def normalize_pos(pos) when is_atom(pos), do: pos
+  def normalize_pos(_), do: :unknown
+
+  @doc """
+  Picks the most important POS if there are multiple.
+  """
+  def pick_primary_pos(pos_list) do
+    priority = [:interjection, :verb, :noun, :adjective, :adverb, :preposition, :conjunction]
+
+    Enum.find(priority, fn p -> p in pos_list end) || hd(pos_list)
   end
 
-  @doc "Fallback classification when no intent pattern matches."
-  defp fallback_intent(:unknown, tokens) when is_list(tokens) do
-    words = Enum.map(tokens, &String.downcase(&1.word))
-    pos_list = Enum.flat_map(tokens, & &1.pos)
+  @doc """
+  Attempts to merge token structs into multiword phrases based on Brain.
+  """
+  def merge_multiword_phrases(tokens) do
+    do_merge(tokens, [], [])
+  end
 
-    cond do
-      Enum.any?(words, &(&1 in @greeting_words)) or
-        dominant_pos?(pos_list, "interjection") -> :greeting
+  defp do_merge([], acc, _), do: Enum.reverse(acc)
 
-      Enum.any?(words, &(&1 in @affirmative_words)) -> :affirmation
+  defp do_merge([t1 | rest], acc, build) do
+    build = build ++ [t1]
+    phrase = Enum.map(build, & &1.text) |> Enum.join(" ")
 
-      true -> :unknown
+    case Brain.get(phrase) do
+      %BrainCell{} = cell ->
+        merged_token = %Token{
+          text: phrase,
+          pos: normalize_all_pos(cell.pos),
+          source: :merged,
+          embedded_vector: nil
+        }
+
+        do_merge(rest, [merged_token | acc], [])
+
+      nil when length(build) < @multiword_cutoff ->
+        do_merge(rest, acc, build)
+
+      _ ->
+        [head | tail] = build
+        do_merge([head | rest], acc ++ [head], [])
     end
   end
 
-  defp fallback_intent(:unknown, pos_lists) when is_list(pos_lists) do
-    words = Enum.map(pos_lists, fn
-      [{word, _} | _] -> String.downcase(word)
-      {word, _} -> String.downcase(word)
-      _ -> nil
-    end)
-
-    pos_list = Enum.flat_map(pos_lists, fn
-      [{_word, pos} | _] -> [pos]
-      {_word, pos} -> [pos]
-      _ -> []
-    end)
-
-    IO.puts("🧩 Running fallback on words: #{inspect(words)}")
-    IO.puts("🔬 POS Frequency: #{inspect(Enum.frequencies(pos_list))}")
-    IO.puts("⚖️ Dominant POS check: #{inspect(dominant_pos?(pos_list, "interjection"))}")
-
-    cond do
-      Enum.any?(words, &(&1 in @greeting_words)) -> :greeting
-      Enum.any?(words, &(&1 in @affirmative_words)) -> :affirmation
-      true -> :unknown
-    end
-  end
-
-  defp fallback_intent(intent, _), do: intent
-
-  defp dominant_pos?(pos_list, target_pos, threshold \\ 0.6) do
-    freq = Enum.frequencies(pos_list)
-    total = Enum.reduce(freq, 0, fn {_k, v}, acc -> acc + v end)
-    score = Map.get(freq, target_pos, 0) / total
-    score >= threshold
-  end
-
-  defp cartesian_product([]), do: [[]]
-
-  defp cartesian_product([head | tail]) do
-    for h <- head, t <- cartesian_product(tail), do: [h | t]
-  end
-
   @doc """
-  Normalizes incoming POS (e.g., from dictionary API).
+  Generates a Cartesian product of POS combinations.
   """
-  def normalize_pos(pos) when is_binary(pos), do: String.downcase(pos)
-  def normalize_pos(_), do: "unknown"
-
-  @doc """
-  Picks the most relevant POS from a list, using a preferred priority order.
-  """
-  def pick_primary_pos(pos_list) when is_list(pos_list) do
-    preferred_order = [
-      "interjection",
-      "exclamation",
-      "wh_pronoun",
-      "wh_determiner",
-      "modal",
-      "aux",
-      "pronoun",
-      "verb",
-      "adjective",
-      "noun",
-      "adverb",
-      "preposition",
-      "determiner",
-      "conjunction"
-    ]
-
-    Enum.find(preferred_order, &(&1 in pos_list)) || List.first(pos_list)
+  def cartesian_product([head | tail]) do
+    Enum.reduce(tail, Enum.map(head, fn h -> [h] end), fn list, acc ->
+      for x <- acc, y <- list, do: x ++ [y]
+    end)
   end
+
+  def cartesian_product([]), do: []
 end
 

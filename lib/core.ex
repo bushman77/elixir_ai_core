@@ -1,111 +1,121 @@
 defmodule Core do
   require Logger
-
   alias Core.{Tokenizer, IntentResolver, Token, DB}
   alias LexiconEnricher
+alias Core.SemanticInput
 
-  @max_retry 2
+def get_cells(%Token{phrase: phrase}) when is_binary(phrase) do
+  Brain.get_state().active_cells
+  |> Map.keys()
+  |> Enum.filter(fn key ->
+    String.starts_with?(key, "#{phrase}|")
+  end)
+  |> Enum.map(&Brain.get_by_key/1)
+  |> Enum.filter(& &1)  # Remove any nils
+end
 
-  # Entry point for raw string input with retries
-  def resolve_input(input, retry_count \\ 0)
-
-  def resolve_input(input, retry_count) when retry_count < @max_retry do
+  @doc "Entry point for resolving raw input (string)"
+  def resolve_input(input) when is_binary(input) do
     tokens =
       input
-      |> Tokenizer.resolve_phrases()
-      |> Enum.map(&%Token{phrase: &1})
+      |> Tokenizer.tokenize()
+      |> Enum.map(fn
+        %Token{} = t -> t
+        str -> %Token{phrase: str}
+      end)
+      |> Enum.map(&activate_cells/1)
 
-    phrases = Enum.map(tokens, & &1.phrase)
+    brain_cells =
+      tokens
+      |> Enum.filter(& &1)
 
-    case ensure_cells_started(phrases) do
-      {:ok, brain_cells} ->
-        Logger.debug("🧠 BrainCells activated: #{length(brain_cells)}")
-        {:ok, IntentResolver.resolve_intent(brain_cells)}
+    active = Brain.get_state.active_cells
+    |> Map.keys
 
-      {:error, :not_found} ->
-        Logger.warning("⚠️ Enrichment failed for '#{input}': :not_found")
-        resolve_input(input, retry_count + 1)
+    #check if word or phrase exists
+    Enum.each(tokens, fn token -> 
+      Brain.get_or_start token.phrase     
+    end)
+
+    if Enum.empty?(brain_cells) do
+      String.starts_with?("hello world", "hello")
+      Logger.warning("⚠️ No usable BrainCells for: #{inspect(input)}")
+      {:error, :not_found}
+    else
+      {:ok, IntentResolver.resolve_intent(brain_cells)}
     end
   end
 
-  def resolve_input(_input, _retry_count), do: {:error, :max_retries_exceeded}
 
-  # Entry point for list of phrases or pre-enriched input
-  def resolve_input(input, opts) when is_list(input) and is_list(opts) do
-    case ensure_cells_started(input) do
+def resolve_and_classify(sentence) do
+  semantic = %SemanticInput{sentence: sentence, source: :user}
+  |> Tokenizer.tokenize()
+  |> POSEngine.tag()
+  |> Brain.link_cells()
+  |> IntentClassifier.classify()
+  |> MoodCore.attach_mood()
+  |> ResponsePlanner.analyze()
+
+  {:ok, semantic}
+end
+
+#  def resolve_and_classify(input) do
+#    case resolve_input(input) do
+#      {:ok, intent_result} -> intent_result
+#      {:error, _} -> %{intent: :unknown, confidence: 0.0, reason: :unresolved}
+#    end
+#  end
+
+  # Token → attach BrainCell if found
+  def update_token_with_cell(%Token{phrase: word} = token) do
+    case Brain.get_all(word.phrase) do
+      %BrainCell{} = cell ->
+        Brain.ensure_running(cell)
+        %{token | cell: cell, pos: cell.pos, keyword: cell.word}
+
+      nil ->
+        Logger.warning("⚠️ No BrainCell found for #{inspect(word)}")
+        token
+    end
+  end
+
+  def activate_cells(token) do
+    Brain.get_all(token.phrase)
+    |> case do
+      cells -> 
+        Enum.each(cells, fn cell -> 
+          Brain.ensure_started(cell)
+        end)
+        token
+      _ -> token
+    end
+  end
+
+  # Unused fallback enrichment (optional to keep or remove)
+  defp enrich_if_missing(word) do
+    case LexiconEnricher.enrich(word) do
       {:ok, cells} ->
-        classify_and_plan(cells, opts)
+        Enum.each(cells, &store_cell/1)
+        cells
 
       {:error, reason} ->
-        IO.warn("⚠️ Could not resolve input: #{inspect(reason)}")
-        {:error, reason}
+        Logger.warning("⚠️ Enrichment failed for '#{word}': #{inspect(reason)}")
+        []
     end
   end
 
-  def resolve_and_classify(input) do
-    case resolve_input(input) do
-      {:ok, intent_result} -> intent_result
-      {:error, _} -> %{intent: :unknown, confidence: 0.0, reason: :unresolved}
+  defp store_cell(%BrainCell{} = cell) do
+    normalized =
+      cell
+      |> Map.from_struct()
+      |> Map.drop([:__meta__, :__struct__])
+      |> then(&struct(BrainCell, &1))
+
+    unless DB.cell_exists?(normalized.id) do
+      DB.insert_cell!(normalized)
     end
-  end
 
-  # Ensures cells for each phrase are started and returns the list
-  def ensure_cells_started(phrases) do
-    cells =
-      phrases
-      |> Enum.flat_map(&load_or_enrich_cells/1)
-
-    Enum.each(cells, fn cell -> Brain.ensure_started(cell) end)
-
-    case cells do
-      [] -> {:error, :not_found}
-      _ -> {:ok, cells}
-    end
-  end
-
-  # Attempts to load existing cells, or enriches if not present
-  defp load_or_enrich_cells(phrase) do
-    case Brain.get_all(phrase) do
-      [] ->
-        case LexiconEnricher.enrich(phrase) do
-          {:ok, cells} ->
-IO.inspect cells
-            store_cells(cells)
-            cells
-
-          {:error, reason} ->
-            Logger.warn("⚠️ Enrichment failed for '#{phrase.phrase}': #{inspect(reason)}")
-            []
-        end
-
-      existing -> existing
-    end
-  end
-
-  # Stores cells to DB and brain registry
-  defp store_cells(cells) do
-    Enum.each(cells, fn cell ->
-      normalized = normalize_cell(cell)
-
-      unless DB.cell_exists?(normalized.id) do
-        DB.insert_cell!(normalized)
-      end
-
-      Brain.store(normalized)
-    end)
-  end
-
-  # Normalize any loaded or enriched BrainCell struct
-  defp normalize_cell(%BrainCell{} = cell) do
-    cell
-    |> Map.from_struct()
-    |> Map.drop([:__meta__, :__struct__])
-    |> then(&struct(BrainCell, &1))
-  end
-
-  # Placeholder for downstream planner
-  defp classify_and_plan(cells, _opts) do
-    %{tokens: cells, intent: :placeholder}
+    Brain.store(normalized)
   end
 end
 
