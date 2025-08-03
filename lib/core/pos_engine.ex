@@ -1,27 +1,41 @@
 defmodule Core.POSEngine do
-  alias Core.{SemanticInput, Token}
-  alias Brain
+  @moduledoc """
+  Tags parts of speech for the given SemanticInput using multiword POS and basic heuristics.
+  """
 
-  @fallback_pos "unknown"
+  alias Core.SemanticInput
+  alias Core.Token
+  alias Core.MultiwordPOS
 
-  def tag(%SemanticInput{token_structs: tokens, cells: cells} = input) do
-    pos_list = Enum.map(tokens, fn %Token{phrase: word} = token ->
-      pos = find_pos(word, cells)
-      {word, pos}
-    end)
+  @doc """
+  Tags the tokens in a SemanticInput with POS data.
+  """
+  def tag(%SemanticInput{token_structs: tokens} = semantic) do
+    tagged_tokens =
+      Enum.map(tokens, fn token ->
+        %Token{token |
+          pos: guess_pos(token.phrase)
+        }
+      end)
 
-    %{input | pos_list: pos_list}
+    %{semantic | token_structs: tagged_tokens, pos_list: Enum.map(tagged_tokens, & &1.pos)}
   end
 
-  defp find_pos(word, cells) do
-    case Enum.find(cells, fn cell -> cell.word == word end) do
-      nil -> @fallback_pos
-      %{} = cell ->
-        case cell.pos do
-          nil -> @fallback_pos
-          pos when is_list(pos) -> List.first(pos)
-          pos -> pos
-        end
+  # POS guessing can be upgraded to use a dictionary, ML model, or rule-based tags
+  defp guess_pos(word) when is_binary(word) do
+    case MultiwordPOS.lookup(word) do
+      :unknown -> naive_guess(word)
+      pos -> [pos]
+    end
+  end
+
+  # Naive POS rules (can be replaced later with LexiconEnricher logic)
+  defp naive_guess(word) do
+    cond do
+      String.ends_with?(word, "ing") -> [:verb]
+      String.ends_with?(word, "ed") -> [:verb]
+      String.length(word) <= 3 -> [:preposition, :conjunction]
+      true -> [:noun] # Default fallback
     end
   end
 end

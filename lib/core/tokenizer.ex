@@ -1,47 +1,132 @@
 defmodule Core.Tokenizer do
-  alias Core.{Token, SemanticInput}
+  @moduledoc """
+  Tokenizer that merges known multiword phrases and generates token structs
+  with position and source metadata.
+  """
 
+  alias Core.{Token, SemanticInput, PhraseDetector}
+  alias Brain
+
+  @doc """
+  Tokenizes a SemanticInput sentence, merging known multiword phrases.
+
+  Returns the updated SemanticInput with `tokens` (as strings)
+  and `token_structs` (as %Token{} structs).
+  """
   def tokenize(%SemanticInput{sentence: sentence} = semantic) do
-    phrase_list = Brain.get_all_phrases() |> Enum.map(&String.downcase/1)
+    phrase_list =PhraseDetector.known_phrases()
 
-    words = sentence
-            |> String.downcase()
-            |> String.split()
+    words =
+      sentence
+      |> String.downcase()
+      |> String.split()
 
     merged = merge_phrases(words, phrase_list)
 
-    tokens = Enum.with_index(merged, fn phrase, index ->
-      %Token{
-        phrase: phrase,
-        position: index,
-        source: :user
-      }
-    end)
+    token_structs =
+      Enum.with_index(merged, fn phrase, index ->
+        %Token{
+          phrase: phrase,
+          position: index,
+          source: :user
+        }
+      end)
 
-    %{semantic | tokens: Enum.map(tokens, & &1.phrase), token_structs: tokens}
+    %SemanticInput{
+      semantic
+      | tokens: Enum.map(token_structs, & &1.phrase),
+        token_structs: token_structs
+    }
   end
 
-  # merges known phrases, returns ["how are you", "doing"] from ["how", "are", "you", "doing"]
-  defp merge_phrases(words, phrases) do
-    merge_phrases(words, phrases, [])
-  end
+  # Merges multiword phrases from a known list into a flat list of merged tokens
+  defp merge_phrases(words, phrases), do: do_merge_phrases(words, phrases, [])
 
-  defp merge_phrases([], _phrases, acc), do: Enum.reverse(acc)
+  defp do_merge_phrases([], _phrases, acc), do: Enum.reverse(acc)
 
-  defp merge_phrases(words, phrases, acc) do
-    matched =
+  defp do_merge_phrases(words, phrases, acc) do
+    match =
       Enum.find(phrases, fn phrase ->
         phrase_words = String.split(phrase)
         Enum.take(words, length(phrase_words)) == phrase_words
       end)
 
-    if matched do
-      skip = String.split(matched) |> length()
-      rest = Enum.drop(words, skip)
-      merge_phrases(rest, phrases, [matched | acc])
-    else
-      [head | tail] = words
-      merge_phrases(tail, phrases, [head | acc])
+    case match do
+      nil ->
+        [head | tail] = words
+        do_merge_phrases(tail, phrases, [head | acc])
+
+      matched_phrase ->
+        skip_count = length(String.split(matched_phrase))
+        rest = Enum.drop(words, skip_count)
+        do_merge_phrases(rest, phrases, [matched_phrase | acc])
+    end
+  end
+end
+defmodule Core.Tokenizer do
+  @moduledoc """
+  Tokenizer that merges known multiword phrases and generates token structs
+  with position and source metadata. Uses Core.MultiwordMatcher to retrieve known phrases.
+  """
+
+  alias Core.{Token, SemanticInput}
+  alias Core.MultiwordMatcher
+
+  @doc """
+  Tokenizes a SemanticInput sentence, merging known multiword phrases.
+
+  Returns the updated SemanticInput with `tokens` (as strings)
+  and `token_structs` (as %Token{} structs).
+  """
+  def tokenize(%SemanticInput{sentence: sentence} = semantic) do
+    phrase_list =
+      MultiwordMatcher.get_phrases()
+      |> Enum.map(&String.downcase/1)
+
+    words =
+      sentence
+      |> String.downcase()
+      |> String.split()
+
+    merged = merge_phrases(words, phrase_list)
+
+    token_structs =
+      Enum.with_index(merged, fn phrase, index ->
+        %Token{
+          phrase: phrase,
+          position: index,
+          source: :user
+        }
+      end)
+
+    %SemanticInput{
+      semantic
+      | tokens: Enum.map(token_structs, & &1.phrase),
+        token_structs: token_structs
+    }
+  end
+
+  # Merges multiword phrases from a known list into a flat list of merged tokens
+  defp merge_phrases(words, phrases), do: do_merge_phrases(words, phrases, [])
+
+  defp do_merge_phrases([], _phrases, acc), do: Enum.reverse(acc)
+
+  defp do_merge_phrases(words, phrases, acc) do
+    match =
+      Enum.find(phrases, fn phrase ->
+        phrase_words = String.split(phrase)
+        Enum.take(words, length(phrase_words)) == phrase_words
+      end)
+
+    case match do
+      nil ->
+        [head | tail] = words
+        do_merge_phrases(tail, phrases, [head | acc])
+
+      matched_phrase ->
+        skip_count = length(String.split(matched_phrase))
+        rest = Enum.drop(words, skip_count)
+        do_merge_phrases(rest, phrases, [matched_phrase | acc])
     end
   end
 end

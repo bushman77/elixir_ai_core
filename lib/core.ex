@@ -3,6 +3,7 @@ defmodule Core do
   alias Core.{Tokenizer, IntentResolver, Token, DB}
   alias LexiconEnricher
 alias Core.SemanticInput
+alias Core.POSEngine
 
 def get_cells(%Token{phrase: phrase}) when is_binary(phrase) do
   Brain.get_state().active_cells
