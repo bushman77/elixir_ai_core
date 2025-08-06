@@ -4,6 +4,8 @@ defmodule Core do
   alias LexiconEnricher
 alias Core.SemanticInput
 alias Core.POSEngine
+alias Core.IntentClassifier
+alias Core.ResponsePlanner
 
 def get_cells(%Token{phrase: phrase}) when is_binary(phrase) do
   Brain.get_state().active_cells
@@ -49,23 +51,18 @@ end
 
 
 def resolve_and_classify(sentence) do
-  semantic = %SemanticInput{sentence: sentence, source: :user}
-  |> Tokenizer.tokenize()
-  |> POSEngine.tag()
-  |> Brain.link_cells()
-  |> IntentClassifier.classify()
-  |> MoodCore.attach_mood()
-  |> ResponsePlanner.analyze()
+  semantic =
+    %SemanticInput{sentence: sentence, source: :user}
+    |> Tokenizer.tokenize()
+    |> POSEngine.tag()
+    |> Brain.link_cells()
+    |> IntentClassifier.classify_tokens()
+    |> MoodCore.attach_mood()
+    |> ResponsePlanner.analyze()
 
-  {:ok, semantic}
+  {:ok, %{semantic | intent: "unknown", keyword: nil, confidence: 0.0}}
+
 end
-
-#  def resolve_and_classify(input) do
-#    case resolve_input(input) do
-#      {:ok, intent_result} -> intent_result
-#      {:error, _} -> %{intent: :unknown, confidence: 0.0, reason: :unresolved}
-#    end
-#  end
 
   # Token → attach BrainCell if found
   def update_token_with_cell(%Token{phrase: word} = token) do

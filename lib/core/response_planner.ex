@@ -3,55 +3,59 @@ defmodule Core.ResponsePlanner do
   Chooses a response based on intent, keyword, confidence, and optionally mood or prior context.
   """
 
-  alias Brain
+  alias Core.{MemoryCore, SemanticInput}
   alias BrainCell
-  alias Core.MemoryCore
   alias PhraseGenerator
 
   @high 0.6
   @low 0.3
 
   # === Entry Point ===
-  def plan(%{intent: intent, cell: cell, confidence: conf}) when not is_nil(cell) do
-    plan_with_cell(intent, cell, conf)
-  end
+  def analyze(%SemanticInput{} = semantic) do
+    response =
+      cond do
+        not is_nil(semantic.cell) -> plan_with_cell(semantic)
+        not is_nil(semantic.keyword) -> plan_with_keyword(semantic)
+        true -> "Hmm… I didn’t quite understand that."
+      end
 
-  def plan(%{intent: intent, keyword: word, confidence: conf}) do
-    plan_with_keyword(intent, word, conf)
+    %SemanticInput{semantic | response: response}
   end
-
-  def plan(_), do: "Hmm… I didn’t quite understand that."
 
   # === Intent Routing with Cell ===
-  defp plan_with_cell(:greeting, _cell, conf) when conf >= @high,
+  defp plan_with_cell(%SemanticInput{intent: :greeting, confidence: conf}) when conf >= @high,
     do: "Hey there! 👋 How can I assist you today?"
 
-  defp plan_with_cell(:farewell, _cell, conf) when conf >= @low,
+  defp plan_with_cell(%SemanticInput{intent: :farewell, confidence: conf}) when conf >= @low,
     do: "Goodbye for now. Take care out there."
 
-  defp plan_with_cell(:define, %BrainCell{word: word, definition: defn}, conf) when conf > @low,
-    do: "#{word}: #{defn}"
+  defp plan_with_cell(%SemanticInput{intent: :define, cell: %BrainCell{word: w, definition: d}, confidence: conf})
+       when conf > @low,
+    do: "#{w}: #{d}"
 
-  defp plan_with_cell(:reflect, %BrainCell{word: word}, conf) when conf > @low do
+  defp plan_with_cell(%SemanticInput{intent: :reflect, cell: %BrainCell{word: word}, confidence: conf})
+       when conf > @low do
     phrase = PhraseGenerator.generate_phrase(word, mood: :reflective)
     "Hmm… #{word} makes me think of: #{phrase}"
   end
 
-  defp plan_with_cell(:recall, %BrainCell{word: word}, conf) when conf > @low do
+  defp plan_with_cell(%SemanticInput{intent: :recall, cell: %BrainCell{word: word}, confidence: conf})
+       when conf > @low do
     phrase = PhraseGenerator.generate_phrase(word, mood: :nostalgic)
     "I remember something like: #{phrase}"
   end
 
-  defp plan_with_cell(:unknown, %BrainCell{word: word}, _conf) do
+  defp plan_with_cell(%SemanticInput{intent: :unknown, cell: %BrainCell{word: word}}) do
     phrase = PhraseGenerator.generate_phrase(word, mood: :curious)
     "I'm not quite sure about that… but '#{word}' brings to mind: #{phrase}"
   end
 
-  defp plan_with_cell(intent, %BrainCell{word: word}, conf),
-    do: fallback_response(intent, word, conf)
+  defp plan_with_cell(%SemanticInput{intent: intent, cell: %BrainCell{word: word}, confidence: conf}) do
+    fallback_response(intent, word, conf)
+  end
 
-  # === Intent Routing with Keyword Only (legacy fallback) ===
-  defp plan_with_keyword(:question, word, conf) do
+  # === Intent Routing with Keyword Only (Legacy Fallback) ===
+  defp plan_with_keyword(%SemanticInput{intent: :question, keyword: word, confidence: conf}) do
     case {word, conf} do
       {"why", c} when c > @high -> "Why questions are my favorite! Let’s explore."
       {"how", c} when c > @low -> "How things work can be fascinating — what specifically?"
@@ -61,10 +65,11 @@ defmodule Core.ResponsePlanner do
     end
   end
 
-  defp plan_with_keyword(intent, word, conf) when conf < @low,
-    do: "I noticed the intent `#{intent}` with `#{word}`, but I'm unsure. Want to clarify?"
+  defp plan_with_keyword(%SemanticInput{intent: intent, keyword: word, confidence: conf}) when conf < @low do
+    "I noticed the intent `#{intent}` with `#{word}`, but I'm unsure. Want to clarify?"
+  end
 
-  defp plan_with_keyword(intent, word, _conf) do
+  defp plan_with_keyword(%SemanticInput{intent: intent, keyword: word}) do
     recent = MemoryCore.recent(1)
 
     case recent do
@@ -86,7 +91,8 @@ defmodule Core.ResponsePlanner do
   end
 
   # === Fallback ===
-  defp fallback_response(intent, nil, _), do: "I picked up `#{intent}`, but I need a bit more to go on."
+  defp fallback_response(intent, nil, _),
+    do: "I picked up `#{intent}`, but I need a bit more to go on."
 
   defp fallback_response(intent, word, _),
     do: "I noticed `#{intent}` and `#{word}`, but couldn’t handle that combo just yet."

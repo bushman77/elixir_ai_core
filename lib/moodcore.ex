@@ -28,6 +28,14 @@ defmodule MoodCore do
   @spec current_mood() :: mood
   def current_mood, do: GenServer.call(__MODULE__, :current_mood)
 
+@doc """
+Attaches the current dominant mood to a SemanticInput struct.
+"""
+def attach_mood(%{__struct__: struct} = input) do
+  Map.put(input, :mood, current_mood())
+end
+
+
   @doc "Returns the current score (0.0 to 1.0) of the given mood."
   @spec mood_score(mood) :: float
   def mood_score(mood), do: GenServer.call(__MODULE__, {:mood_score, mood})

@@ -52,6 +52,13 @@ defmodule BrainCell do
   end
 
   # Public interface
+# In BrainCell
+def get(id) do
+  case Registry.lookup(Core.Registry, id) do
+    [{pid, _}] -> get_state(pid)
+    _ -> nil
+  end
+end
 
   def get_state(pid), do: GenServer.call(pid, :get_state)
 

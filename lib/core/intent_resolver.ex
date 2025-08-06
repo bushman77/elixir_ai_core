@@ -1,47 +1,35 @@
 defmodule Core.IntentResolver do
-  alias Core.IntentClassifier
+  @moduledoc """
+  Resolves intent from a SemanticInput struct.
+  Falls back to IntentMatrix if classifier confidence is too low.
+  """
+
   alias Core.IntentMatrix
+  alias Core.SemanticInput
 
   @fallback_threshold 1.2
 
-  @doc """
-  Resolves intent from enriched tokens (ideally containing braincell metadata).
-  Falls back to IntentMatrix if classifier confidence is too low.
-  Always returns a %{
-    intent: atom,
-    confidence: float,
-    keyword: string | nil,
-    source: :classifier | :matrix,
-    tokens: list
-  } structure.
-  """
-def resolve_intent(tokens) when is_list(tokens) do
-  case IntentClassifier.classify(tokens) do
-    {:ok, %{confidence: confidence} = result} when confidence >= @fallback_threshold ->
-      Map.put(result, :source, :classifier)
-
-    {:ok, %{keyword: keyword}} ->
-      fallback = IntentMatrix.classify(tokens)
-
-      %{
-        intent: fallback.intent,
-        confidence: fallback.confidence,
-        keyword: keyword,
-        tokens: tokens,
-        source: :matrix
-      }
-
-    other ->
-      IO.inspect(other, label: "⚠️ Unexpected classifier output")
-      %{
-        intent: :unknown,
-        confidence: 0.0,
-        keyword: nil,
-        tokens: tokens,
-        source: :none
-      }
+  def resolve_intent(%SemanticInput{intent: intent, confidence: conf} = semantic)
+      when intent != :unknown and conf >= @fallback_threshold do
+    %{
+      intent: intent,
+      confidence: conf,
+      keyword: semantic.keyword,
+      tokens: semantic.tokens,
+      source: :classifier
+    }
   end
-end
 
+  def resolve_intent(%SemanticInput{tokens: tokens, keyword: keyword}) do
+    fallback = IntentMatrix.classify(tokens)
+
+    %{
+      intent: fallback.intent,
+      confidence: fallback.confidence,
+      keyword: fallback.keyword || keyword,
+      tokens: tokens,
+      source: :matrix
+    }
+  end
 end
 

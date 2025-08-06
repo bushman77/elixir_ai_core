@@ -1,15 +1,16 @@
 defmodule Core.Token do
   defstruct [
-    :phrase,
-    :text,           # string
-    :input_text,     # full sentence
-    :is_phrase,      # bool
-    :index,          # position
-    :pos,            # optional: ["ADV"], etc.
-    :position,
-    :embedding,      # optional: vector
-    :embedded_vector,
-    :source          # :tokenizer, :enricher, etc.
+    :text,            # The token itself (e.g. "run", "apple")
+    :input_text,      # Original input sentence
+    :phrase,          # Phrase this token is part of (if any)
+    :is_phrase,       # Boolean: is this token a multi-word phrase?
+    :index,           # Index position in sentence
+    :pos,             # Part of speech tag, e.g., "NOUN"
+    :position,        # Coordinates or position vector if used
+    :embedding,       # Vector embedding (if available)
+    :embedded_vector, # Optional alias or alternative for embedding
+    :response,        # Optional phrase or sentence response for this token
+    :source           # :tokenizer, :enricher, etc.
   ]
 end
 

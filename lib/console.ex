@@ -63,7 +63,7 @@ alias Core.SemanticInput
 
   defp handle_input(input) do
 case Core.resolve_and_classify(input) do
-  {:ok, %SemanticInput{} = semantic} ->
+  {:ok, semantic} ->
     IO.puts("🧠 Intent Classification:")
     IO.puts(" → Intent: #{semantic.intent}")
     IO.puts(" → Keyword: #{semantic.keyword}")
