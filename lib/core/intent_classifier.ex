@@ -85,7 +85,6 @@ defmodule Core.IntentClassifier do
   Adds `:intent`, `:confidence`, and optionally `:keyword` to SemanticInput.
   """
   def classify_tokens(%{token_structs: token_structs} = struct) do
-IO.inspect struct
     pos_lists = Enum.map(token_structs, & &1.pos)
     combos = POS.cartesian_product(pos_lists)
 

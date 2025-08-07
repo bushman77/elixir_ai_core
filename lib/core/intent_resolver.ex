@@ -1,34 +1,33 @@
 defmodule Core.IntentResolver do
-  @moduledoc """
-  Resolves intent from a SemanticInput struct.
-  Falls back to IntentMatrix if classifier confidence is too low.
-  """
+  alias Core.{IntentMatrix, SemanticInput}
 
-  alias Core.IntentMatrix
-  alias Core.SemanticInput
-
-  @fallback_threshold 1.2
+  @fallback_threshold Application.compile_env(:elixir_ai_core, :fallback_threshold, 1.2)
 
   @doc """
-  Resolves or upgrades the intent classification for a given SemanticInput.
-
-  If the input already has a high-confidence intent, it is preserved.
-  Otherwise, it falls back to the IntentMatrix.
+  Resolves intent on a fully populated SemanticInput.
   """
-  def resolve_intent(%SemanticInput{} = semantic) do
-    if semantic.intent != :unknown and semantic.confidence >= @fallback_threshold do
-      %SemanticInput{semantic | source: :classifier}
-    else
-      fallback = IntentMatrix.classify(semantic.tokens)
-
-      %SemanticInput{
-        semantic
-        | intent: fallback.intent,
-          confidence: fallback.confidence,
-          keyword: fallback.keyword || semantic.keyword,
-          source: :matrix
-      }
-    end
+  def resolve_intent(%SemanticInput{intent: intent, confidence: conf} = semantic)
+      when intent != :unknown and conf >= @fallback_threshold do
+    semantic
+    |> Map.put(:source, :classifier)
   end
+
+def resolve_intent(%SemanticInput{token_structs: tokens, keyword: kw} = semantic) do
+  %{
+    intent: intent,
+    score: score,
+    keyword: keyword,
+    source: source
+  } = IntentMatrix.classify(tokens)
+
+  %SemanticInput{
+    semantic
+    | intent: intent,
+      confidence: score,
+      keyword: keyword || kw,
+      source: source
+  }
+end
+
 end
 

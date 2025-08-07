@@ -59,7 +59,6 @@ defmodule Console do
   end
 
   defp handle_input(input) do
-IO.inspect(input, label: :handle_input)
     case Core.resolve_input(input) do
       {:ok, %SemanticInput{} = semantic} ->
         IO.puts("""
@@ -70,8 +69,8 @@ IO.inspect(input, label: :handle_input)
          → Source: #{semantic.source}
         """)
 
-        IO.puts("🧠 Tokens:")
-        Enum.each(semantic.token_structs || semantic.tokens, &IO.inspect(&1))
+        #IO.puts("🧠 Tokens:")
+        #Enum.each(semantic.token_structs || semantic.tokens, &IO.inspect(&1))
 
         if semantic.mood, do: IO.puts("🎭 Mood: #{semantic.mood}")
         if semantic.response, do: IO.puts("💬 Planned Response: #{semantic.response}")

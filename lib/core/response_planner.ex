@@ -1,100 +1,134 @@
 defmodule Core.ResponsePlanner do
   @moduledoc """
-  Chooses a response based on intent, keyword, confidence, and optionally mood or prior context.
+  Chooses a response based on SemanticInput (intent, keyword, confidence, mood, cell).
   """
 
   alias Core.{MemoryCore, SemanticInput}
   alias BrainCell
   alias PhraseGenerator
 
-  @high 0.6
-  @low 0.3
+  @high_confidence 0.6
+  @low_confidence  0.3
 
-  # === Entry Point ===
-  def analyze(%SemanticInput{} = semantic) do
-    response =
-      cond do
-        not is_nil(semantic.cell) -> plan_with_cell(semantic)
-        not is_nil(semantic.keyword) -> plan_with_keyword(semantic)
-        true -> "Hmm… I didn’t quite understand that."
-      end
+  @greeting_msgs [
+    "Hey there! 👋 How can I assist you today?",
+    "Hello! What can I do for you?",
+    "Hi there! How’s it going?"
+  ]
 
-    %SemanticInput{semantic | response: response}
+  @clarify_msg "Hmm… I didn’t quite understand that."
+
+  @farewell_msg "Goodbye for now. Take care!"
+
+  # Public API
+  @doc "Attach a `response` to the SemanticInput based on its fields."
+  @spec analyze(SemanticInput.t()) :: SemanticInput.t()
+  def analyze(%SemanticInput{} = sem) do
+    response = plan(sem)
+    %{sem | response: response}
   end
 
-  # === Intent Routing with Cell ===
-  defp plan_with_cell(%SemanticInput{intent: :greeting, confidence: conf}) when conf >= @high,
-    do: "Hey there! 👋 How can I assist you today?"
+  #— Core dispatch
 
-  defp plan_with_cell(%SemanticInput{intent: :farewell, confidence: conf}) when conf >= @low,
-    do: "Goodbye for now. Take care out there."
-
-  defp plan_with_cell(%SemanticInput{intent: :define, cell: %BrainCell{word: w, definition: d}, confidence: conf})
-       when conf > @low,
-    do: "#{w}: #{d}"
-
-  defp plan_with_cell(%SemanticInput{intent: :reflect, cell: %BrainCell{word: word}, confidence: conf})
-       when conf > @low do
-    phrase = PhraseGenerator.generate_phrase(word, mood: :reflective)
-    "Hmm… #{word} makes me think of: #{phrase}"
+  # 1) If a BrainCell is attached, use that for context-rich replies
+  defp plan(%SemanticInput{cell: %BrainCell{} = cell} = sem) do
+    plan_by_cell(sem.intent, sem.confidence, sem.keyword, cell, sem.mood)
   end
 
-  defp plan_with_cell(%SemanticInput{intent: :recall, cell: %BrainCell{word: word}, confidence: conf})
-       when conf > @low do
-    phrase = PhraseGenerator.generate_phrase(word, mood: :nostalgic)
+  # 2) If only a keyword is present, try question/legacy fallback
+  defp plan(%SemanticInput{keyword: kw} = sem) when not is_nil(kw) do
+    plan_by_keyword(sem.intent, sem.confidence, kw)
+  end
+
+  # 3) Pure intent-based defaults
+  defp plan(%SemanticInput{intent: :greeting} = sem) do
+    Enum.random(@greeting_msgs)
+  end
+
+  defp plan(%SemanticInput{intent: :farewell}), do: @farewell_msg
+
+  # 4) Low-confidence or unknown
+  defp plan(%SemanticInput{confidence: conf}) when conf <= 0.0, do: @clarify_msg
+  defp plan(_), do: @clarify_msg
+
+  #— Helpers for cell-based planning
+
+  defp plan_by_cell(:greeting, conf, _kw, _cell, _mood) when conf >= @high_confidence do
+    Enum.random(@greeting_msgs)
+  end
+
+  defp plan_by_cell(:farewell, conf, _kw, _cell, _mood) when conf >= @low_confidence do
+    @farewell_msg
+  end
+
+  defp plan_by_cell(:define, _conf, _kw, %BrainCell{word: w, definition: d}, _mood) do
+    "#{w}: #{d}"
+  end
+
+  defp plan_by_cell(:reflect, _conf, _kw, %BrainCell{word: w}, :reflective) do
+    phrase = PhraseGenerator.generate_phrase(w, mood: :reflective)
+    "Hmm… #{w} makes me think of: #{phrase}"
+  end
+
+  defp plan_by_cell(:recall, _conf, _kw, %BrainCell{word: w}, :nostalgic) do
+    phrase = PhraseGenerator.generate_phrase(w, mood: :nostalgic)
     "I remember something like: #{phrase}"
   end
 
-  defp plan_with_cell(%SemanticInput{intent: :unknown, cell: %BrainCell{word: word}}) do
-    phrase = PhraseGenerator.generate_phrase(word, mood: :curious)
-    "I'm not quite sure about that… but '#{word}' brings to mind: #{phrase}"
+  defp plan_by_cell(:unknown, _conf, _kw, %BrainCell{word: w}, _mood) do
+    phrase = PhraseGenerator.generate_phrase(w, mood: :curious)
+    "I'm not quite sure about that… but '#{w}' brings to mind: #{phrase}"
   end
 
-  defp plan_with_cell(%SemanticInput{intent: intent, cell: %BrainCell{word: word}, confidence: conf}) do
-    fallback_response(intent, word, conf)
+  # Generic fallback for other cell-based intents
+  defp plan_by_cell(intent, _conf, _kw, %BrainCell{word: w}, _mood) do
+    "I see intent `#{intent}` around '#{w}', but I'm not ready for that yet."
   end
 
-  # === Intent Routing with Keyword Only (Legacy Fallback) ===
-  defp plan_with_keyword(%SemanticInput{intent: :question, keyword: word, confidence: conf}) do
-    case {word, conf} do
-      {"why", c} when c > @high -> "Why questions are my favorite! Let’s explore."
-      {"how", c} when c > @low -> "How things work can be fascinating — what specifically?"
-      {"what", _} -> "What would you like to explore more?"
-      {w, c} when c < @low -> "That sounds like a question about \"#{w}\", but I’m not too sure. Could you clarify?"
-      {w, _} -> "Great question on \"#{w}\". Let me try to help!"
-    end
+  #— Helpers for keyword-only planning
+
+  defp plan_by_keyword(:question, conf, "why") when conf >= @high_confidence do
+    "Why questions are my favorite! Let’s explore."
   end
 
-  defp plan_with_keyword(%SemanticInput{intent: intent, keyword: word, confidence: conf}) when conf < @low do
-    "I noticed the intent `#{intent}` with `#{word}`, but I'm unsure. Want to clarify?"
+  defp plan_by_keyword(:question, conf, "how") when conf >= @low_confidence do
+    "How things work can be fascinating — what specifically?"
   end
 
-  defp plan_with_keyword(%SemanticInput{intent: intent, keyword: word}) do
-    recent = MemoryCore.recent(1)
+  defp plan_by_keyword(:question, _, "what") do
+    "What would you like to explore more?"
+  end
 
-    case recent do
-      [%{intent: last_intent, keyword: last_word}] ->
+  defp plan_by_keyword(:question, conf, kw) when conf < @low_confidence do
+    "I think you're asking about \"#{kw}\", but could you clarify?"
+  end
+
+  defp plan_by_keyword(:question, _conf, kw) do
+    "Great question about \"#{kw}\". Let me try to help!"
+  end
+
+  defp plan_by_keyword(intent, conf, kw) when conf < @low_confidence do
+    "I noticed `#{intent}` and keyword `#{kw}`, but I'm not sure. Can you clarify?"
+  end
+
+  defp plan_by_keyword(intent, _conf, kw) do
+    case MemoryCore.recent(1) do
+      [%{intent: last_intent, keyword: last_kw}] ->
         cond do
-          last_intent == :question and intent == :question ->
-            "Still thinking about that? Let’s dive deeper into \"#{word}\"."
-
-          last_word == word and intent in [:reflect, :recall] ->
-            "You mentioned \"#{word}\" again — here’s a fresh take."
-
+          last_intent == intent ->
+            "You're still on \"#{kw}\" — let's keep going."
+          last_kw == kw ->
+            "You brought up \"#{kw}\" again — here's another angle."
           true ->
-            fallback_response(intent, word, nil)
+            generic_keyword_fallback(intent, kw)
         end
-
       _ ->
-        fallback_response(intent, word, nil)
+        generic_keyword_fallback(intent, kw)
     end
   end
 
-  # === Fallback ===
-  defp fallback_response(intent, nil, _),
-    do: "I picked up `#{intent}`, but I need a bit more to go on."
-
-  defp fallback_response(intent, word, _),
-    do: "I noticed `#{intent}` and `#{word}`, but couldn’t handle that combo just yet."
+  defp generic_keyword_fallback(intent, kw) do
+    "I saw intent `#{intent}` and keyword `#{kw}`, but couldn't handle that combo yet."
+  end
 end
 

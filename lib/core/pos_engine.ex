@@ -1,41 +1,62 @@
 defmodule Core.POSEngine do
   @moduledoc """
-  Tags parts of speech for the given SemanticInput using multiword POS and basic heuristics.
+  Tags parts of speech for the given SemanticInput using
+  multiword POS and basic heuristics, with greeting overrides.
   """
 
-  alias Core.SemanticInput
-  alias Core.Token
-  alias Core.MultiwordPOS
+  alias Core.{SemanticInput, Token, MultiwordPOS}
+
+  @greeting_overrides %{
+    "hello" => :interjection,
+    "hi"    => :interjection,
+    "hey"   => :interjection,
+    "yo"    => :interjection
+  }
 
   @doc """
   Tags the tokens in a SemanticInput with POS data.
   """
   def tag(%SemanticInput{token_structs: tokens} = semantic) do
-    tagged_tokens =
-      Enum.map(tokens, fn token ->
-        %Token{token |
-          pos: guess_pos(token.phrase)
-        }
-      end)
+    tagged =
+      tokens
+      |> Enum.map(&tag_token/1)
 
-    %{semantic | token_structs: tagged_tokens, pos_list: Enum.map(tagged_tokens, & &1.pos)}
+    %{ semantic
+       | token_structs: tagged,
+         pos_list: Enum.map(tagged, & &1.pos) }
   end
 
-  # POS guessing can be upgraded to use a dictionary, ML model, or rule-based tags
-  defp guess_pos(word) when is_binary(word) do
-    case MultiwordPOS.lookup(word) do
-      :unknown -> naive_guess(word)
-      pos -> [pos]
+  defp tag_token(%Token{phrase: phrase} = token) do
+    pos_list = phrase
+               |> String.downcase()
+               |> override_or_lookup()
+               |> List.wrap()          # ensure it’s always a list
+    %{ token | pos: pos_list }
+  end
+
+  # 1) Greeting override
+  defp override_or_lookup(word) do
+    case @greeting_overrides[word] do
+      nil -> lookup_or_naive(word)
+      override_pos -> override_pos
     end
   end
 
-  # Naive POS rules (can be replaced later with LexiconEnricher logic)
+  # 2) MultiwordPOS dictionary
+  defp lookup_or_naive(word) do
+    case MultiwordPOS.lookup(word) do
+      :unknown -> naive_guess(word)
+      pos       -> pos
+    end
+  end
+
+  # 3) Fallback heuristics
   defp naive_guess(word) do
     cond do
-      String.ends_with?(word, "ing") -> [:verb]
-      String.ends_with?(word, "ed") -> [:verb]
-      String.length(word) <= 3 -> [:preposition, :conjunction]
-      true -> [:noun] # Default fallback
+      String.ends_with?(word, "ing") -> :verb
+      String.ends_with?(word, "ed")  -> :verb
+      String.length(word) <= 3       -> :preposition
+      true                            -> :noun
     end
   end
 end
