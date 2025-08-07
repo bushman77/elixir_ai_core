@@ -1,95 +1,77 @@
 defmodule Core do
+  @moduledoc "Central Core pipeline for tokenizing, linking, classifying, and planning AI behavior."
+
   require Logger
-  alias Core.{Tokenizer, IntentResolver, Token, DB}
+
+  alias Core.{
+    Tokenizer,
+    IntentClassifier,
+    IntentResolver,
+    POSEngine,
+    ResponsePlanner,
+    SemanticInput,
+    Token,
+    DB
+  }
+
   alias LexiconEnricher
-alias Core.SemanticInput
-alias Core.POSEngine
-alias Core.IntentClassifier
-alias Core.ResponsePlanner
+  alias MoodCore
+  alias Brain
+  alias BrainCell
 
-def get_cells(%Token{phrase: phrase}) when is_binary(phrase) do
-  Brain.get_state().active_cells
-  |> Map.keys()
-  |> Enum.filter(fn key ->
-    String.starts_with?(key, "#{phrase}|")
-  end)
-  |> Enum.map(&Brain.get_by_key/1)
-  |> Enum.filter(& &1)  # Remove any nils
-end
 
-  @doc "Entry point for resolving raw input (string)"
-  def resolve_input(input) when is_binary(input) do
-    tokens =
-      input
-      |> Tokenizer.tokenize()
-      |> Enum.map(fn
-        %Token{} = t -> t
-        str -> %Token{phrase: str}
-      end)
-      |> Enum.map(&activate_cells/1)
-
-    brain_cells =
-      tokens
-      |> Enum.filter(& &1)
-
-    active = Brain.get_state.active_cells
-    |> Map.keys
-
-    #check if word or phrase exists
-    Enum.each(tokens, fn token -> 
-      Brain.get_or_start token.phrase     
+def activate_tokens(%SemanticInput{token_structs: tokens} = semantic) do
+  updated_tokens =
+    Enum.map(tokens, fn token ->
+      activated = activate_cells(token)
+      Brain.get_or_start(activated.phrase)
+      activated
     end)
 
-    if Enum.empty?(brain_cells) do
-      String.starts_with?("hello world", "hello")
-      Logger.warning("⚠️ No usable BrainCells for: #{inspect(input)}")
-      {:error, :not_found}
-    else
-      {:ok, IntentResolver.resolve_intent(brain_cells)}
+  %{semantic | token_structs: updated_tokens}
+end
+
+  @doc """
+  Master pipeline: from raw input to fully processed SemanticInput.
+  """
+
+def resolve_input(input) when is_binary(input) do
+  input
+  |> Tokenizer.tokenize()                   # builds SemanticInput from string
+  |> Core.activate_tokens()                 # applies Brain.get / activation
+  |> POSEngine.tag()                        # updates token_structs with POS
+  #|> Core.update_token_phrases()            # ensures phrases are correct after tagging
+  |> IntentClassifier.classify_tokens()     # adds intent, keyword, confidence
+  |> IntentResolver.resolve_intent()        # resolves final intent from matrix
+  |> MoodCore.attach_mood()                 # modulates mood + records state
+  |> ResponsePlanner.analyze()              # plans response structure
+  |> then(&{:ok, &1})
+end
+
+  # Token → ensure BrainCell is started
+  def activate_cells(%Token{phrase: phrase} = token) do
+    case Brain.get_all(phrase) do
+      [] -> token
+      cells ->
+        Enum.each(cells, &Brain.ensure_started/1)
+        token
     end
   end
 
-
-def resolve_and_classify(sentence) do
-  semantic =
-    %SemanticInput{sentence: sentence, source: :user}
-    |> Tokenizer.tokenize()
-    |> POSEngine.tag()
-    |> Brain.link_cells()
-    |> IntentClassifier.classify_tokens()
-    |> MoodCore.attach_mood()
-    |> ResponsePlanner.analyze()
-
-  {:ok, %{semantic | intent: "unknown", keyword: nil, confidence: 0.0}}
-
-end
-
-  # Token → attach BrainCell if found
-  def update_token_with_cell(%Token{phrase: word} = token) do
-    case Brain.get_all(word.phrase) do
-      %BrainCell{} = cell ->
+  # Token → attach BrainCell info (pos, keyword, etc.)
+  def update_token_with_cell(%Token{phrase: phrase} = token) do
+    case Brain.get_all(phrase) do
+      [%BrainCell{} = cell | _] ->
         Brain.ensure_running(cell)
         %{token | cell: cell, pos: cell.pos, keyword: cell.word}
 
-      nil ->
-        Logger.warning("⚠️ No BrainCell found for #{inspect(word)}")
+      _ ->
+        Logger.warning("⚠️ No BrainCell found for #{inspect(phrase)}")
         token
     end
   end
 
-  def activate_cells(token) do
-    Brain.get_all(token.phrase)
-    |> case do
-      cells -> 
-        Enum.each(cells, fn cell -> 
-          Brain.ensure_started(cell)
-        end)
-        token
-      _ -> token
-    end
-  end
-
-  # Unused fallback enrichment (optional to keep or remove)
+  # Deprecated: separate enrich call (handled now in other flows)
   defp enrich_if_missing(word) do
     case LexiconEnricher.enrich(word) do
       {:ok, cells} ->
@@ -115,5 +97,8 @@ end
 
     Brain.store(normalized)
   end
+
+  # (Optional) legacy fallback hook
+  def resolve_and_classify(input), do: resolve_input(input)
 end
 

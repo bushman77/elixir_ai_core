@@ -9,27 +9,26 @@ defmodule Core.IntentResolver do
 
   @fallback_threshold 1.2
 
-  def resolve_intent(%SemanticInput{intent: intent, confidence: conf} = semantic)
-      when intent != :unknown and conf >= @fallback_threshold do
-    %{
-      intent: intent,
-      confidence: conf,
-      keyword: semantic.keyword,
-      tokens: semantic.tokens,
-      source: :classifier
-    }
-  end
+  @doc """
+  Resolves or upgrades the intent classification for a given SemanticInput.
 
-  def resolve_intent(%SemanticInput{tokens: tokens, keyword: keyword}) do
-    fallback = IntentMatrix.classify(tokens)
+  If the input already has a high-confidence intent, it is preserved.
+  Otherwise, it falls back to the IntentMatrix.
+  """
+  def resolve_intent(%SemanticInput{} = semantic) do
+    if semantic.intent != :unknown and semantic.confidence >= @fallback_threshold do
+      %SemanticInput{semantic | source: :classifier}
+    else
+      fallback = IntentMatrix.classify(semantic.tokens)
 
-    %{
-      intent: fallback.intent,
-      confidence: fallback.confidence,
-      keyword: fallback.keyword || keyword,
-      tokens: tokens,
-      source: :matrix
-    }
+      %SemanticInput{
+        semantic
+        | intent: fallback.intent,
+          confidence: fallback.confidence,
+          keyword: fallback.keyword || semantic.keyword,
+          source: :matrix
+      }
+    end
   end
 end
 

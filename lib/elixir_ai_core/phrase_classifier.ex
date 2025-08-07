@@ -3,7 +3,7 @@ defmodule ElixirAiCore.PhraseClassifier do
 
   def classify(tokens) when is_binary(tokens) do
     tokens
-    |> ElixirAiCore.Tokenizer.tokenize()
+    |> Core.Tokenizer.tokenize()
     |> classify()
   end
 

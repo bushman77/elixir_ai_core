@@ -6,12 +6,79 @@ defmodule Core.IntentClassifier do
   alias Core.POS
   alias Core.SemanticInput
 
-  @intent_patterns %{
-    greet: [[:interjection, :noun], [:interjection], [:interjection, :verb]],
-    question: [[:adverb, :auxiliary, :pronoun], [:verb, :pronoun], [:adverb, :verb]],
-    command: [[:verb, :noun], [:verb]],
-    bye: [[:interjection], [:verb, :adverb]]
-  }
+@intent_patterns %{
+  greet: [
+    [:interjection, :noun],
+    [:interjection],
+    [:interjection, :verb],
+    [:interjection, :pronoun],
+    [:interjection, :adverb],
+    [:noun, :verb, :interjection]
+  ],
+  
+  bye: [
+    [:interjection],
+    [:verb, :adverb],
+    [:interjection, :verb],
+    [:verb, :noun],
+    [:interjection, :noun]
+  ],
+
+  question: [
+    [:adverb, :auxiliary, :pronoun],
+    [:verb, :pronoun],
+    [:adverb, :verb],
+    [:auxiliary, :noun, :verb],
+    [:interjection, :auxiliary, :pronoun],
+    [:pronoun, :verb, :noun],
+    [:modal, :pronoun, :verb]
+  ],
+
+  command: [
+    [:verb, :noun],
+    [:verb],
+    [:verb, :determiner, :noun],
+    [:verb, :preposition, :noun],
+    [:interjection, :verb],
+    [:noun, :verb, :noun]
+  ],
+
+  confirm: [
+    [:interjection],
+    [:adverb],
+    [:verb],
+    [:interjection, :verb]
+  ],
+
+  deny: [
+    [:adverb, :verb],
+    [:interjection],
+    [:interjection, :adverb],
+    [:verb, :adverb]
+  ],
+
+  thank: [
+    [:interjection, :pronoun],
+    [:interjection],
+    [:verb, :pronoun],
+    [:verb, :noun]
+  ],
+
+  inform: [
+    [:noun, :verb, :noun],
+    [:pronoun, :verb, :noun],
+    [:noun, :verb],
+    [:pronoun, :verb],
+    [:verb, :determiner, :noun]
+  ],
+
+  why: [
+    [:adverb, :auxiliary, :pronoun],
+    [:adverb, :verb, :noun],
+    [:interjection, :adverb, :verb],
+    [:adverb, :modal, :pronoun, :verb]
+  ]
+}
 
   @doc """
   Classifies intent based on token POS patterns or fallback heuristics.

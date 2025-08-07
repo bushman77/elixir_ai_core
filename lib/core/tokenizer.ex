@@ -1,7 +1,7 @@
 defmodule Core.Tokenizer do
   @moduledoc """
   Tokenizer that merges known multiword phrases and generates token structs
-  with position and source metadata. Connects tokens to braincell activations.
+  with position and source metadata.
   """
 
   alias Core.{Token, SemanticInput}
@@ -9,10 +9,10 @@ defmodule Core.Tokenizer do
   alias Brain
 
   @doc """
-  Tokenizes a SemanticInput sentence, merging known multiword phrases,
-  and activates braincells per phrase. Returns updated SemanticInput.
+  Tokenizes a raw sentence string, merges known multiword phrases,
+  and returns a new %SemanticInput{} struct.
   """
-  def tokenize(%SemanticInput{sentence: sentence} = semantic) do
+  def tokenize(sentence) when is_binary(sentence) do
     phrase_list =
       MultiwordMatcher.get_phrases()
       |> Enum.map(&String.downcase/1)
@@ -33,19 +33,19 @@ defmodule Core.Tokenizer do
         }
       end)
 
-    # 🔥 Activate braincells here
-    _ = Enum.each(token_structs, fn token ->
+    # Activate braincells for now
+    Enum.each(token_structs, fn token ->
       Brain.get_or_start(token.phrase)
     end)
 
     %SemanticInput{
-      semantic
-      | tokens: Enum.map(token_structs, & &1.phrase),
-        token_structs: token_structs
+      sentence: sentence,
+      tokens: Enum.map(token_structs, & &1.phrase),
+      token_structs: token_structs
     }
   end
 
-  # Merges multiword phrases from a known list into a flat list of merged tokens
+  # Recursive phrase merger
   defp merge_phrases(words, phrases), do: do_merge_phrases(words, phrases, [])
 
   defp do_merge_phrases([], _phrases, acc), do: Enum.reverse(acc)
