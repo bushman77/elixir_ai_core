@@ -1,4 +1,4 @@
-defmodule ElixirAiCore.Model do
+defmodule Model do
   @moduledoc """
   Core model definition. Agnostic, extendable, and built from scratch.
   """

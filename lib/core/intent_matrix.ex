@@ -18,6 +18,7 @@ defmodule Core.IntentMatrix do
   @default_intent :unknown
   @default_score 0.5
 
+  # POS patterns and their associated intent weights
   @patterns Map.new([
     {[:interjection], %{greeting: 1.5}},
     {[:interjection, :noun], %{greeting: 1.2}},
@@ -35,6 +36,7 @@ defmodule Core.IntentMatrix do
     {[:preposition, :noun], %{command: 0.9}}
   ])
 
+  # Keywords mapped to intent/boost values
   @keyword_boosts %{
     "help" => %{intent: :inquiry, boost: 0.4},
     "why" => %{intent: :why, boost: 1.1},
@@ -51,9 +53,7 @@ defmodule Core.IntentMatrix do
     "tell" => %{intent: :command, boost: 0.7}
   }
 
-  @doc """
-  Classifies intent from a SemanticInput.
-  """
+  @doc "Classifies intent from a SemanticInput struct."
   @spec classify(SemanticInput.t()) :: guess
   def classify(%SemanticInput{pos_list: pos_list, tokens: tokens}) do
     pos_list
@@ -62,36 +62,38 @@ defmodule Core.IntentMatrix do
     |> Map.put(:source, :matrix)
   end
 
-  @doc """
-  Fallback: classifies directly from a list of tokens.
-  Useful when SemanticInput is not yet formed.
-  """
+  @doc "Fallback classifier for raw Token lists."
   @spec classify([Token.t()]) :: guess
   def classify(tokens) when is_list(tokens) do
-    pos_list = Enum.flat_map(tokens, & &1.pos)
+    pos_list = Enum.map(tokens, & &1.pos) |> List.flatten()
     classify(%SemanticInput{pos_list: pos_list, tokens: tokens})
   end
 
+  # Match POS pattern exactly or fallback to unknown
   defp match_pattern(pos_list) do
-    case Map.get(@patterns, pos_list) do
-      nil ->
-        %{intent: @default_intent, keyword: nil, score: @default_score}
-
-      intent_scores ->
-        {intent, score} = Enum.max_by(intent_scores, fn {_i, s} -> s end)
-        %{intent: intent, keyword: nil, score: score}
+    Map.get(@patterns, pos_list)
+    |> case do
+      nil -> %{intent: @default_intent, keyword: nil, score: @default_score}
+      intent_scores -> pick_top_scoring(intent_scores)
     end
   end
 
+  # Keyword-based boosting, preserving intent match
   defp maybe_boost_with_keyword(guess, tokens) do
     Enum.find_value(tokens, fn %Token{phrase: phrase} ->
       with %{intent: intent, boost: boost} <- Map.get(@keyword_boosts, phrase),
-           true <- intent == guess.intent do
+           true <- guess.intent == intent do
         %{guess | keyword: phrase, score: guess.score + boost}
       else
         _ -> nil
       end
     end) || guess
+  end
+
+  # Return the intent/score with highest value
+  defp pick_top_scoring(intent_scores) do
+    Enum.max_by(intent_scores, fn {_intent, score} -> score end)
+    |> then(fn {intent, score} -> %{intent: intent, keyword: nil, score: score} end)
   end
 end
 

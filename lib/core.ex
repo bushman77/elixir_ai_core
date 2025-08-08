@@ -2,6 +2,9 @@ defmodule Core do
   @moduledoc "Central Core pipeline for tokenizing, linking, classifying, and planning AI behavior."
 
   require Logger
+import Nx.Defn
+  alias Axon
+
 
   alias Core.{
     Tokenizer,
@@ -19,6 +22,17 @@ defmodule Core do
   alias Brain
   alias BrainCell
 
+  @spec infer(Axon.Model.t(), Nx.Tensor.t() | list()) :: any()
+  def infer(nil, _input), do: {:error, :no_model_loaded}
+
+  def infer(model, input) do
+    # Ensure input is a tensor
+    input_tensor = Nx.tensor(input)
+
+    # Do inference (assuming model is a {model, params} tuple)
+    {compiled_model, params} = model
+    Axon.predict(compiled_model, params, input_tensor)
+  end
 
 def activate_tokens(%SemanticInput{token_structs: tokens} = semantic) do
   updated_tokens =
@@ -37,14 +51,13 @@ end
 
 def resolve_input(input) when is_binary(input) do
   input
-  |> Tokenizer.tokenize()                   # builds SemanticInput from string
-  |> Core.activate_tokens()                 # applies Brain.get / activation
-  |> POSEngine.tag()                        # updates token_structs with POS
-  #|> Core.update_token_phrases()            # ensures phrases are correct after tagging
-  |> IntentClassifier.classify_tokens()     # adds intent, keyword, confidence
-  |> IntentResolver.resolve_intent()        # resolves final intent from matrix
-  |> MoodCore.attach_mood()                 # modulates mood + records state
-  |> ResponsePlanner.analyze()              # plans response structure
+  |> Tokenizer.tokenize()
+  |> Core.activate_tokens()
+  |> POSEngine.tag()
+  |> IntentClassifier.classify_tokens()
+  |> IntentResolver.resolve_intent()
+  |> MoodCore.attach_mood()
+  |> ResponsePlanner.analyze()
   |> then(&{:ok, &1})
 end
 

@@ -1,4 +1,4 @@
-defmodule ElixirAiCore.ModelServer do
+defmodule ModelServer do
   @moduledoc """
   GenServer managing AI model lifecycle and inference.
   """
@@ -25,6 +25,20 @@ defmodule ElixirAiCore.ModelServer do
   def handle_call({:load_model, model_data}, _from, state) do
     {:reply, :ok, Map.put(state, :model, model_data)}
   end
+
+
+def handle_call({:infer, input}, _from, %{model: nil} = state) do
+  {:reply, {:error, :no_model_loaded}, state}
+end
+
+def handle_call({:infer, input}, _from, %{model: {_, _} = model} = state) do
+  try do
+    output = Core.infer(model, input)
+    {:reply, {:ok, output}, state}
+  rescue
+    e -> {:reply, {:error, e}, state}
+  end
+end
 
   def handle_call({:infer, _input}, _from, %{model: nil} = state) do
     {:reply, {:error, :no_model_loaded}, state}

@@ -6,6 +6,7 @@ defmodule Core.SemanticInput do
     :cells,               # [%BrainCell{}, ...]
     :pos_list,            # [{"how", "adv"}, ...]
     :intent,              # :greeting, :question
+    :gold_intent,
     :keyword,             # "how"
     :confidence,          # 0.92
     :mood,                # :neutral, :curious, etc.
