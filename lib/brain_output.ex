@@ -3,6 +3,15 @@ defmodule BrainOutput do
   Handles AI output generation and external expression.
   Supports thought tracing, phrase generation, and mood expression.
   """
+@enforce_keys [:mode]
+defstruct mode: :default,
+          last_phrase: nil,
+          last_word: nil,
+          mood: :neutral,
+          tone: nil,
+          history: [],
+          trace: [],
+          meta: %{}
 
   alias Brain
   alias PhraseGenerator
