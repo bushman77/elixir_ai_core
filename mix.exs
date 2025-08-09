@@ -28,8 +28,8 @@ defp elixirc_paths(_),     do: ["lib"]
 
 defp deps do
   [
-    {:nx, "~> 0.6.2"},
-    {:axon, "~> 0.6.0"},
+    {:axon, "~> 0.6.1"},
+    {:nx, "~> 0.6.4"},
     #{:exla, "~> 0.6.3"}, 
     {:jason, "~> 1.4"},
     {:tesla, "~> 1.4"},
