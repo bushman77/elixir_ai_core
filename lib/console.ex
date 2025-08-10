@@ -92,7 +92,8 @@ defmodule Console do
     case LexiconEnricher.enrich(word) do
       {:ok, cells} when is_list(cells) ->
         IO.puts("📚 Enriched entries for '#{word}':")
-        Enum.each(cells, &IO.inspect(&1))
+        #Enum.each(cells, &IO.inspect(&1))
+        DB.insert_all(cells)
 
       {:error, reason} ->
         IO.puts("❌ Failed to enrich: #{inspect(reason)}")

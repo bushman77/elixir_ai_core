@@ -64,7 +64,9 @@ end
   # Token → ensure BrainCell is started
   def activate_cells(%Token{phrase: phrase} = token) do
     case Brain.get_all(phrase) do
-      [] -> token
+      [] -> 
+        LexiconEnricher.enrich  token.text
+        activate_cells token
       cells ->
         Enum.each(cells, &Brain.ensure_started/1)
         token

@@ -20,6 +20,7 @@ defmodule LexiconEnricher do
   defp fetch_from_api(word) do
     with {:ok, %{status: 200, body: [%{"word" => w, "meanings" => meanings} | _]}} <- LexiconClient.fetch_word(word),
          cells when is_list(cells) <- build_cells(w, meanings) do
+      Core.DB.insert_all(cells)
       {:ok, cells}
     else
       {:ok, %{status: 404}} -> {:error, :not_found}
