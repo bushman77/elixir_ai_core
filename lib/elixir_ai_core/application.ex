@@ -12,7 +12,8 @@ defmodule ElixirAiCore.Application do
       {Core.EmotionModulator, []}, # Assuming Core.EmotionModulator is a valid process module
       {MoodCore, []},
       {Brain.CuriosityThread, []},
-      {Core.MemoryCore, []} # Assuming Core.MemoryCore is a valid process module
+      {Core.MemoryCore, []}, # Assuming Core.MemoryCore is a valid process module
+      {Task, fn -> Core.MiniIntent.start() end}
     ]
 
     opts = [strategy: :one_for_one, name: ElixirAiCore.TopSupervisor]
