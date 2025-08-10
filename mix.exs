@@ -28,9 +28,9 @@ defp elixirc_paths(_),     do: ["lib"]
 
 defp deps do
   [
-    {:axon, "~> 0.6.1"},
-    {:nx, "~> 0.6.4"},
-    #{:exla, "~> 0.6.3"}, 
+ {:axon, "~> 0.7.0"},
+  {:nx, "~> 0.9.1"},
+  {:explorer, "~> 0.8.0"},
     {:jason, "~> 1.4"},
     {:tesla, "~> 1.4"},
     {:hackney, "~> 1.18"},
