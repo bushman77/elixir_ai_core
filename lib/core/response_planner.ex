@@ -41,7 +41,6 @@ defmodule Core.ResponsePlanner do
   ]
 
   @clarify_msg "Hmm… I didn’t quite understand that."
-
   @farewell_msg "Goodbye for now. Take care!"
 
   # Mood-aware boundaries for insults
@@ -61,42 +60,64 @@ defmodule Core.ResponsePlanner do
     "If venting’s done, we can solve your problem."
   ]
 
-  # Public API
-  @doc "Attach a `response` to the SemanticInput based on its fields."
+  @doc "Attach a `response` and a tiny trace to the SemanticInput based on its fields."
   @spec analyze(SemanticInput.t()) :: SemanticInput.t()
   def analyze(%SemanticInput{} = sem) do
+    sem = %{sem | intent: normalize_intent(sem.intent)}
     response = plan(sem)
-    %{sem | response: response, planned_response: response}
+
+    trace = %{
+      intent: sem.intent,
+      kw: sem.keyword,
+      conf: sem.confidence,
+      mood: sem.mood
+    }
+
+    %{sem | response: response, planned_response: response, activation_summary: trace}
   end
 
-  #— Core dispatch
+  # ---------- Intent normalization (Suggestion #1) ----------
+
+  defp normalize_intent(i) do
+    case i do
+      :greet    -> :greeting
+      :bye      -> :farewell
+      :thanks   -> :thank
+      :insult   -> :insult
+      :question -> :question
+      :command  -> :command
+      :confirm  -> :confirm
+      :deny     -> :deny
+      :inform   -> :inform
+      :why      -> :why
+      other     -> other || :unknown
+    end
+  end
+
+  # ---------- Core dispatch (Suggestion #2: ordering) ----------
 
   # 1) If a BrainCell is attached, use that for context-rich replies
   defp plan(%SemanticInput{cell: %BrainCell{} = cell} = sem) do
     plan_by_cell(sem.intent, sem.confidence, sem.keyword, cell, sem.mood)
   end
 
-  # 2) Pure intent-based defaults
-# In ResponsePlanner, your greeting clause:
-defp plan(%SemanticInput{intent: :greeting, mood: mood}) do
-  case mood do
-    :grumpy ->
-      if :rand.uniform() < 0.8 do
-        Enum.random(@greeting_grumpy)
-      else
-        Enum.random(@greeting_calm)     # occasionally de-escalate
-      end
+  # 2) Explicit intents (before keyword fallback)
 
-    :positive -> Enum.random(@greeting_positive)
-    :calm     -> Enum.random(@greeting_calm)
-    _         -> Enum.random(@greeting_neutral)
+  defp plan(%SemanticInput{intent: :greeting, mood: mood, confidence: conf}) do
+    case mood do
+      :grumpy ->
+        if conf >= @high_confidence and :rand.uniform() < 0.2,
+          do: Enum.random(@greeting_calm),
+          else: Enum.random(@greeting_grumpy)
+
+      :positive -> Enum.random(@greeting_positive)
+      :calm     -> Enum.random(@greeting_calm)
+      _         -> Enum.random(@greeting_neutral)
+    end
   end
-end
 
-  # 3) Farewell (priority)
   defp plan(%SemanticInput{intent: :farewell}), do: @farewell_msg
 
-  # 4) Insult handling (mood-aware, works even with no BrainCell)
   defp plan(%SemanticInput{intent: :insult, mood: mood}) do
     case mood do
       :grumpy   -> Enum.random(@snarky_boundaries)
@@ -105,18 +126,82 @@ end
     end
   end
 
-  # 5) If only a keyword is present, try question/legacy fallback
+  defp plan(%SemanticInput{intent: :thank, confidence: conf}) do
+    if conf >= @low_confidence,
+      do: "You're welcome! Anything else you need?",
+      else: "I think you’re thanking me—happy to help!"
+  end
+
+  defp plan(%SemanticInput{intent: :confirm, confidence: conf}) do
+    if conf >= @low_confidence,
+      do: "Great—I'll proceed.",
+      else: "Sounds like a yes—should I go ahead?"
+  end
+
+  defp plan(%SemanticInput{intent: :deny, confidence: conf}) do
+    if conf >= @low_confidence,
+      do: "No problem. I won’t do that.",
+      else: "Got it—do you want something else instead?"
+  end
+
+  defp plan(%SemanticInput{intent: :command, keyword: kw, confidence: conf}) do
+    cond do
+      conf < @low_confidence ->
+        "I think you're asking me to do something#{if kw, do: " with \"#{kw}\""}—mind clarifying?"
+
+      kw ->
+        "Okay, acting on \"#{kw}\"."
+
+      true ->
+        "Okay—what exactly should I do?"
+    end
+  end
+
+  defp plan(%SemanticInput{intent: :inform, keyword: kw, confidence: conf}) do
+    if conf >= @low_confidence and kw do
+      "Thanks for the info about \"#{kw}\". Want me to log or use that?"
+    else
+      "Thanks for the update. Should I save this?"
+    end
+  end
+
+  defp plan(%SemanticInput{intent: :why, confidence: conf, keyword: kw}) do
+    msg =
+      if conf >= @high_confidence, do: "Why is a great question.", else: "I think you’re asking why."
+
+    msg <>
+      case kw do
+        nil -> " Can you tell me which part you’re curious about?"
+        k   -> " Let’s dig into why around \"#{k}\"—what angle interests you?"
+      end
+  end
+
+  defp plan(%SemanticInput{intent: :question, keyword: kw, confidence: conf}) do
+    cond do
+      conf >= @high_confidence and kw in ["time", "price", "weather"] ->
+        "Great question about \"#{kw}\". I can help with that."
+
+      conf >= @low_confidence and kw ->
+        "Good question about \"#{kw}\"—tell me a bit more."
+
+      conf < @low_confidence and kw ->
+        "I think you're asking about \"#{kw}\"—could you clarify?"
+
+      true ->
+        "Happy to help—what exactly are you asking?"
+    end
+  end
+
+  # 3) Keyword-based generic fallback (after explicit handlers)
   defp plan(%SemanticInput{keyword: kw} = sem) when not is_nil(kw) do
     plan_by_keyword(sem.intent, sem.confidence, kw)
   end
 
-  defp plan(%SemanticInput{intent: :farewell}), do: @farewell_msg
-
-  # 6) Low-confidence or unknown
+  # 4) Low-confidence or unknown
   defp plan(%SemanticInput{confidence: conf}) when conf <= 0.0, do: @clarify_msg
   defp plan(_), do: @clarify_msg
 
-  #— Helpers for cell-based planning
+  # ---------- Cell-based planning helpers (kept intact) ----------
 
   defp plan_by_cell(:greeting, conf, _kw, _cell, _mood) when conf >= @high_confidence do
     Enum.random(@greeting_msgs)
@@ -145,41 +230,34 @@ end
     "I'm not quite sure about that… but '#{w}' brings to mind: #{phrase}"
   end
 
-defp plan_by_cell(:insult, _conf, _kw, _cell, :grumpy) do
-  Enum.random([
-    "Watch your language. 😠",
-    "That's uncalled for.",
-    "Easy there, no need for that."
-  ])
-end
-
-defp plan_by_cell(:insult, _conf, _kw, _cell, _mood) do
-  "That wasn't very nice."
-end
-
-  #— Helpers for keyword-only planning
-defp plan_by_keyword(:greeting, _conf, _kw) do
-  Enum.random(@greeting_msgs)
-end
-
-  defp plan_by_keyword(:question, conf, "why") when conf >= @high_confidence do
-    "Why questions are my favorite! Let’s explore."
+  defp plan_by_cell(:insult, _conf, _kw, _cell, :grumpy) do
+    Enum.random([
+      "Watch your language. 😠",
+      "That's uncalled for.",
+      "Easy there, no need for that."
+    ])
   end
 
-  defp plan_by_keyword(:question, conf, "how") when conf >= @low_confidence do
-    "How things work can be fascinating — what specifically?"
+  defp plan_by_cell(:insult, _conf, _kw, _cell, _mood) do
+    "That wasn't very nice."
   end
 
-  defp plan_by_keyword(:question, _, "what") do
-    "What would you like to explore more?"
-  end
+  # ---------- Keyword-only planning (Suggestion #3) ----------
 
-  defp plan_by_keyword(:question, conf, kw) when conf < @low_confidence do
-    "I think you're asking about \"#{kw}\", but could you clarify?"
-  end
+  defp plan_by_keyword(:greeting, _conf, _kw),
+    do: Enum.random(@greeting_msgs)
 
-  defp plan_by_keyword(:question, _conf, kw) do
-    "Great question about \"#{kw}\". Let me try to help!"
+  defp plan_by_keyword(:question, conf, kw) do
+    cond do
+      conf >= @high_confidence and kw in ["why", "how", "what"] ->
+        "Let’s explore #{kw}—what specifically?"
+
+      conf >= @low_confidence ->
+        "Great question about \"#{kw}\". Want a quick overview or details?"
+
+      true ->
+        "I think you're asking about \"#{kw}\"—could you clarify?"
+    end
   end
 
   defp plan_by_keyword(intent, conf, kw) when conf < @low_confidence do
@@ -192,11 +270,14 @@ end
         cond do
           last_intent == intent ->
             "You're still on \"#{kw}\" — let's keep going."
+
           last_kw == kw ->
             "You brought up \"#{kw}\" again — here's another angle."
+
           true ->
             generic_keyword_fallback(intent, kw)
         end
+
       _ ->
         generic_keyword_fallback(intent, kw)
     end
