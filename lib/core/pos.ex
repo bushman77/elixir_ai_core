@@ -5,6 +5,7 @@ defmodule Core.POS do
 
   alias Core.Token
   alias Brain
+  alias BrainCell
 
   @multiword_cutoff 4
 
@@ -21,7 +22,7 @@ defmodule Core.POS do
           %{token | pos: normalize_all_pos([pos])}
 
         _ ->
-          %{token | pos: ["unknown"]}
+          %{token | pos: [:unknown]}
       end
     end)
   end
@@ -35,7 +36,9 @@ defmodule Core.POS do
     |> Enum.uniq()
   end
 
-  def normalize_pos(pos) when is_binary(pos), do: pos |> String.downcase() |> String.to_atom()
+  def normalize_pos(pos) when is_binary(pos) and pos != "" do
+    pos |> String.downcase() |> String.to_atom()
+  end
   def normalize_pos(pos) when is_atom(pos), do: pos
   def normalize_pos(_), do: :unknown
 
@@ -62,10 +65,16 @@ defmodule Core.POS do
     phrase = Enum.map(build, & &1.text) |> Enum.join(" ")
 
     case Brain.get(phrase) do
-      %BrainCell{} = cell ->
+      %BrainCell{pos: pos} = _cell ->
+        pos_list = 
+          case pos do
+            l when is_list(l) -> l
+            nil -> [:unknown]
+            other -> [other]
+          end
         merged_token = %Token{
           text: phrase,
-          pos: normalize_all_pos(cell.pos),
+          pos: normalize_all_pos(pos_list),
           source: :merged,
           embedded_vector: nil
         }

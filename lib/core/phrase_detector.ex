@@ -7,7 +7,7 @@ defmodule Core.PhraseDetector do
 
   alias Core.Tokenizer
   alias Brain
-  alias BrainCell.Schema
+  alias BrainCell
   alias LexiconEnricher
 
   @min_window 2
@@ -78,7 +78,7 @@ defmodule Core.PhraseDetector do
   defp learn_and_enrich_phrase(phrase) do
     {:ok, cell} = Brain.create(%BrainCell{
       word: phrase,
-      pos: "phrase",
+      pos: [:phrase],
       type: :phrase,
       definition: nil,
       activation: 0.0,
