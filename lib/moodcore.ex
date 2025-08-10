@@ -6,13 +6,14 @@ defmodule MoodCore do
   dopamine and serotonin levels from active BrainCells.
 
   ## Mood Logic
-  - Moods include: :happy, :excited, :sad, :nostalgic, :reflective, :neutral
+  - Moods include: :happy, :excited, :sad, :nostalgic, :reflective, :neutral, :grumpy
   - Each mood has a dynamic intensity between 0.0 and 1.0
   - Intensity decays over time unless reinforced by BrainCell activation
   """
 
-  @moods [:happy, :excited, :sad, :nostalgic, :reflective, :neutral]
+  @moods [:happy, :excited, :sad, :nostalgic, :reflective, :neutral, :grumpy]
   @decay_rate_per_sec 0.005
+  @cooldown_step_ms 5_000
 
   @type mood :: :happy | :excited | :sad | :nostalgic | :reflective | :neutral
   @type state :: %{
@@ -44,6 +45,17 @@ end
   @spec register_activation(%{dopamine: float, serotonin: float}) :: :ok
   def register_activation(%{dopamine: d, serotonin: s}) when is_number(d) and is_number(s) do
     GenServer.cast(__MODULE__, {:register_activation, d, s})
+  end
+
+  @doc """
+  Applies a transient mood nudge with optional TTL-based cooldown.
+  Example: `apply(:negative, amount: 0.4, ttl: 90_000)`
+  """
+  @spec apply(:positive | :negative, keyword) :: :ok
+  def apply(polarity, opts \\ []) when polarity in [:positive, :negative] do
+    amount = opts[:amount] || 0.2
+    ttl    = opts[:ttl] || 0
+    GenServer.cast(__MODULE__, {:apply, polarity, amount, ttl})
   end
 
   @doc "Advances mood state forward by applying decay."
@@ -79,6 +91,21 @@ end
     {:noreply, updated_state}
   end
 
+  # Transient polarity nudge; negative feeds :grumpy, positive boosts :happy
+  @impl true
+  def handle_cast({:apply, :negative, amount, ttl}, state) do
+    s = reinforce_mood(:grumpy, amount, state)
+    if ttl > 0, do: Process.send_after(self(), {:cooldown, :grumpy}, ttl)
+    {:noreply, s}
+  end
+
+  @impl true
+  def handle_cast({:apply, :positive, amount, ttl}, state) do
+    s = reinforce_mood(:happy, amount, state)
+    if ttl > 0, do: Process.send_after(self(), {:cooldown, :happy}, ttl)
+    {:noreply, s}
+  end
+
   @impl true
   def handle_cast(:tick, state), do: {:noreply, decay(state)}
 
@@ -96,6 +123,23 @@ end
       end)
 
     %{state | intensities: new_intensities, last_updated: now()}
+  end
+
+  # Cooldown gradually reduces a target mood toward 0 in small steps
+  @impl true
+  def handle_info({:cooldown, mood}, %{intensities: ints} = state) do
+    current = Map.get(ints, mood, 0.0)
+    step = 0.1
+    new_val = max(current - step, 0.0) |> Float.round(4)
+    new_ints = Map.put(ints, mood, new_val)
+    next =
+      if new_val > 0.0 do
+        Process.send_after(self(), {:cooldown, mood}, @cooldown_step_ms)
+        :ok
+      else
+        :ok
+      end
+    {:noreply, %{state | intensities: new_ints, last_updated: now()}}
   end
 
   defp reinforce_mood(mood, strength, %{intensities: intensities} = state) do

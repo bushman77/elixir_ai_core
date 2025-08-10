@@ -15,7 +15,8 @@ defmodule Core.SemanticInput do
     :activation_summary,  # %{top_cell: ..., score: ...}
     :pattern_roles,       # %{"you" => :subject}
     :cell,                # Optional BrainCell used in response planning
-    :response             # Final planned response text
+    :response,             # Final planned response text
+    :planned_response
   ]
 end
 

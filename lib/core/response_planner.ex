@@ -16,16 +16,57 @@ defmodule Core.ResponsePlanner do
     "Hi there! How’s it going?"
   ]
 
+  @greeting_neutral [
+    "Hey there! 👋 How can I assist you today?",
+    "Hello! What can I do for you?",
+    "Hi there! How’s it going?"
+  ]
+
+  @greeting_positive [
+    "Hey hey! Great to see you 🙌",
+    "Hello! I’m pumped to help today!",
+    "Hi! Ready when you are 😄"
+  ]
+
+  @greeting_calm [
+    "Hello there.",
+    "Hi. How can I help?",
+    "Hey—what would you like to do next?"
+  ]
+
+  @greeting_grumpy [
+    "Yeah… what do you want?",
+    "Hi. Let’s just get this over with.",
+    "Oh, it’s you. What now?"
+  ]
+
   @clarify_msg "Hmm… I didn’t quite understand that."
 
   @farewell_msg "Goodbye for now. Take care!"
+
+  # Mood-aware boundaries for insults
+  @gentle_boundaries [
+    "Let’s keep it respectful. I’m here to help.",
+    "I get that you’re upset. I’ll help, but let’s keep the language clean.",
+    "I’m listening—please avoid insults so we can solve this."
+  ]
+  @firm_boundaries [
+    "That crosses a line. If you want help, drop the insults.",
+    "Not okay. I’ll continue when we’re respectful.",
+    "We can proceed, but not with that language."
+  ]
+  @snarky_boundaries [
+    "Bold strategy. How about we try respect instead?",
+    "Sure. And now, anything useful you actually need?",
+    "If venting’s done, we can solve your problem."
+  ]
 
   # Public API
   @doc "Attach a `response` to the SemanticInput based on its fields."
   @spec analyze(SemanticInput.t()) :: SemanticInput.t()
   def analyze(%SemanticInput{} = sem) do
     response = plan(sem)
-    %{sem | response: response}
+    %{sem | response: response, planned_response: response}
   end
 
   #— Core dispatch
@@ -35,19 +76,43 @@ defmodule Core.ResponsePlanner do
     plan_by_cell(sem.intent, sem.confidence, sem.keyword, cell, sem.mood)
   end
 
-  # 2) If only a keyword is present, try question/legacy fallback
+  # 2) Pure intent-based defaults
+# In ResponsePlanner, your greeting clause:
+defp plan(%SemanticInput{intent: :greeting, mood: mood}) do
+  case mood do
+    :grumpy ->
+      if :rand.uniform() < 0.8 do
+        Enum.random(@greeting_grumpy)
+      else
+        Enum.random(@greeting_calm)     # occasionally de-escalate
+      end
+
+    :positive -> Enum.random(@greeting_positive)
+    :calm     -> Enum.random(@greeting_calm)
+    _         -> Enum.random(@greeting_neutral)
+  end
+end
+
+  # 3) Farewell (priority)
+  defp plan(%SemanticInput{intent: :farewell}), do: @farewell_msg
+
+  # 4) Insult handling (mood-aware, works even with no BrainCell)
+  defp plan(%SemanticInput{intent: :insult, mood: mood}) do
+    case mood do
+      :grumpy   -> Enum.random(@snarky_boundaries)
+      :negative -> Enum.random(@firm_boundaries)
+      _         -> Enum.random(@gentle_boundaries)
+    end
+  end
+
+  # 5) If only a keyword is present, try question/legacy fallback
   defp plan(%SemanticInput{keyword: kw} = sem) when not is_nil(kw) do
     plan_by_keyword(sem.intent, sem.confidence, kw)
   end
 
-  # 3) Pure intent-based defaults
-  defp plan(%SemanticInput{intent: :greeting} = sem) do
-    Enum.random(@greeting_msgs)
-  end
-
   defp plan(%SemanticInput{intent: :farewell}), do: @farewell_msg
 
-  # 4) Low-confidence or unknown
+  # 6) Low-confidence or unknown
   defp plan(%SemanticInput{confidence: conf}) when conf <= 0.0, do: @clarify_msg
   defp plan(_), do: @clarify_msg
 
@@ -80,12 +145,22 @@ defmodule Core.ResponsePlanner do
     "I'm not quite sure about that… but '#{w}' brings to mind: #{phrase}"
   end
 
-  # Generic fallback for other cell-based intents
-  defp plan_by_cell(intent, _conf, _kw, %BrainCell{word: w}, _mood) do
-    "I see intent `#{intent}` around '#{w}', but I'm not ready for that yet."
-  end
+defp plan_by_cell(:insult, _conf, _kw, _cell, :grumpy) do
+  Enum.random([
+    "Watch your language. 😠",
+    "That's uncalled for.",
+    "Easy there, no need for that."
+  ])
+end
+
+defp plan_by_cell(:insult, _conf, _kw, _cell, _mood) do
+  "That wasn't very nice."
+end
 
   #— Helpers for keyword-only planning
+defp plan_by_keyword(:greeting, _conf, _kw) do
+  Enum.random(@greeting_msgs)
+end
 
   defp plan_by_keyword(:question, conf, "why") when conf >= @high_confidence do
     "Why questions are my favorite! Let’s explore."
