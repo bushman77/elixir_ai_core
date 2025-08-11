@@ -5,29 +5,38 @@ defmodule BrainCell do
 
   alias __MODULE__
 
-  @primary_key {:id, :string, autogenerate: false}
+@primary_key {:id, :string, autogenerate: false}
   @table "brain_cells"
 
   schema @table do
+    # Indexable / long text
     field :word, :string
     field :pos, :string
     field :definition, :string
     field :example, :string
-    field :synonyms, {:array, :string}, default: []
-    field :antonyms, {:array, :string}, default: []
     field :function, :string
 
-    # Classification enums
+    # Arrays
+    field :synonyms, {:array, :string}, default: []
+    field :antonyms, {:array, :string}, default: []
+    field :semantic_atoms, {:array, :string}, default: []
+    field :connections, {:array, :string}, default: []
+
+    # IDs / embeddings
+    field :token_ids, {:array, :integer}, default: []
+
+    # Classification
     field :type, Ecto.Enum, values: [:noun, :verb, :concept, :phrase, :emotion, :synapse]
     field :status, Ecto.Enum, values: [:inactive, :active, :dormant, :decayed], default: :inactive
 
     # Neuro-symbolic fields
     field :activation, :float, default: 0.0
+    field :modulated_activation, :float, default: 0.0
     field :dopamine, :float, default: 0.0
     field :serotonin, :float, default: 0.0
-    field :connections, {:array, :string}, default: []
+
+    # Spatial
     field :position, {:array, :float}, default: [0.0, 0.0, 0.0]
-    field :semantic_atoms, {:array, :string}, default: []
 
     # Chemical dosing info
     field :last_dose_at, :utc_datetime_usec
@@ -36,6 +45,18 @@ defmodule BrainCell do
     timestamps()
   end
 
+  # Optional: tighten up inputs so APIs can't poison inserts
+  def changeset(cell, attrs) do
+    cell
+    |> cast(attrs, [
+      :id, :word, :pos, :definition, :example, :function, :type, :status,
+      :synonyms, :antonyms, :semantic_atoms, :connections, :token_ids,
+      :activation, :modulated_activation, :dopamine, :serotonin,
+      :position, :last_dose_at, :last_substance
+    ])
+    |> validate_length(:definition, max: 20_000)
+    |> validate_length(:example, max: 10_000)
+  end
   # --------------------
   # GenServer API
   # --------------------

@@ -4,6 +4,9 @@ defmodule Brain do
 alias Core.{SemanticInput, Token, DB}
   alias BrainCell
   alias LexiconEnricher
+# at top of Brain.ex with the other aliases
+import Ecto.Query, only: [from: 2]
+
 
   ## Public API
 
@@ -206,6 +209,94 @@ def ensure_cell_started(%BrainCell{id: id} = cell) do
     _ ->
       :ok  # already started
   end
+end
+
+# ...
+
+@doc """
+Export labeled training pairs from BrainCell rows.
+
+Rules:
+  * Uses `example` as the training text (must be present and non-empty).
+  * Uses `type` as the intent label. Accepts "intent:greeting", :greeting, "greeting".
+  * Cleans text (lowercase, remove non-alnum except spaces and apostrophes).
+  * Deduplicates by {text,intent}.
+Options:
+  * :intents      -> restrict to a list of allowed intents (strings or atoms)
+  * :min_len      -> drop examples with text shorter than this (default 1)
+  * :limit_per    -> cap items per intent to avoid class skew (default: nil = no cap)
+"""
+def training_pairs(opts \\ []) do
+  intents_opt  = Keyword.get(opts, :intents, nil)
+  min_len      = Keyword.get(opts, :min_len, 1)
+  limit_per    = Keyword.get(opts, :limit_per, nil)
+
+  # Pull only rows that can yield supervised pairs
+  q =
+    from c in BrainCell,
+      where: not is_nil(c.example) and c.example != "" and not is_nil(c.type),
+      select: %{text: c.example, intent: c.type}
+
+  Core.DB.all(q)
+  |> Enum.map(fn %{text: t, intent: i} ->
+    %{text: clean_text(t), intent: normalize_intent(i)}
+  end)
+  |> Enum.filter(& &1.intent)                          # keep only rows with a usable intent
+  |> Enum.filter(fn %{text: t} -> String.length(t) >= min_len end)
+  |> maybe_restrict_intents(intents_opt)
+  |> dedup_by_text_intent()
+  |> maybe_cap_per_intent(limit_per)
+end
+
+# ---------- helpers ----------
+
+defp normalize_intent(i) when is_atom(i), do: Atom.to_string(i)
+defp normalize_intent(i) when is_binary(i) do
+  i
+  |> String.downcase()
+  |> String.trim()
+  |> String.replace_prefix("intent:", "")
+  |> String.replace_prefix("int:", "")
+  |> case do
+    "" -> nil
+    s  -> s
+  end
+end
+defp normalize_intent(_), do: nil
+
+defp clean_text(s) do
+  s
+  |> String.downcase()
+  |> String.replace(~r/[^a-z0-9\s']/u, " ")
+  |> String.replace(~r/\s+/, " ")
+  |> String.trim()
+end
+
+defp dedup_by_text_intent(rows) do
+  rows
+  |> Enum.reduce({MapSet.new(), []}, fn %{text: t, intent: i} = row, {seen, acc} ->
+    key = {t, i}
+    if MapSet.member?(seen, key), do: {seen, acc}, else: {MapSet.put(seen, key), [row | acc]}
+  end)
+  |> elem(1)
+  |> Enum.reverse()
+end
+
+defp maybe_restrict_intents(rows, nil), do: rows
+defp maybe_restrict_intents(rows, intents) do
+  allow =
+    intents
+    |> Enum.map(fn x -> if is_atom(x), do: Atom.to_string(x), else: String.downcase(to_string(x)) end)
+    |> MapSet.new()
+
+  Enum.filter(rows, fn %{intent: i} -> MapSet.member?(allow, i) end)
+end
+
+defp maybe_cap_per_intent(rows, nil), do: rows
+defp maybe_cap_per_intent(rows, cap) when is_integer(cap) and cap > 0 do
+  rows
+  |> Enum.group_by(& &1.intent)
+  |> Enum.flat_map(fn {_i, rs} -> rs |> Enum.shuffle() |> Enum.take(cap) end)
 end
 
 end
