@@ -54,38 +54,45 @@ defmodule Brain do
   Returns {:ok, pids} (may be empty) or {:error, reason}.
   """
   @spec get_or_start(String.t()) :: {:ok, [pid()]} | {:error, term()}
-  def get_or_start(word) when is_binary(word) do
-    word_id = String.downcase(word)
+# lib/brain.ex
+def get_or_start(word) when is_binary(word) do
+  w = String.downcase(word)
 
-    cells =
-      case DB.get_braincells_by_word(word_id) do
-        [] ->
-          case LexiconEnricher.enrich(word_id) do
-            {:ok, new_cells} when is_list(new_cells) -> new_cells
-            _ -> []
-          end
+  short?      = String.length(w) < 3
+  multiword?  = String.contains?(w, " ")
+  functional? = match?([_ | _], Core.MultiwordPOS.lookup(w))
 
-        cs ->
-          cs
-      end
+if short? or multiword? or functional? do
+    {:ok, []}
+  else
+    do_get_or_start(w)
+  end
 
-    case cells do
+end
+
+defp do_get_or_start(word_id) do
+  if Application.get_env(:elixir_ai_core, :enrichment_enabled, false) do
+    case DB.get_braincells_by_word(word_id) do
       [] ->
-        {:error, :not_found}
+        case LexiconEnricher.enrich(word_id) do
+          {:ok, cells} when is_list(cells) ->
+            Enum.each(cells, &ensure_cell_started/1)
+            {:ok, []}
+          _ ->
+            {:error, :not_found}
+        end
 
-      cs ->
-        pids =
-          cs
-          |> Enum.map(&ensure_cell_started/1)
-          |> Enum.flat_map(fn
-            {:ok, pid} -> [pid]
-            :ok -> []
-            _ -> []
-          end)
-
-        {:ok, pids}
+      cells ->
+        Enum.each(cells, &ensure_cell_started/1)
+        {:ok, []}
+    end
+  else
+    case DB.get_braincells_by_word(word_id) do
+      []    -> {:error, :enrichment_disabled}
+      cells -> Enum.each(cells, &ensure_cell_started/1); {:ok, []}
     end
   end
+end
 
   @doc "Registers an activation event for a brain cell by ID."
   def register_activation(id),

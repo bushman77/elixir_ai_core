@@ -2,9 +2,8 @@ defmodule Core do
   @moduledoc "Central Core pipeline for tokenizing, linking, classifying, and planning AI behavior."
 
   require Logger
-import Nx.Defn
+  import Nx.Defn
   alias Axon
-
 
   alias Core.{
     Tokenizer,
@@ -17,103 +16,83 @@ import Nx.Defn
     DB
   }
 
-  alias LexiconEnricher
-  alias MoodCore
   alias Brain
   alias BrainCell
+  # alias LexiconEnricher   # ← not needed in this module anymore (Brain handles enrichment)
+  # alias MoodCore          # keep if used below
 
   @spec infer(Axon.Model.t(), Nx.Tensor.t() | list()) :: any()
   def infer(nil, _input), do: {:error, :no_model_loaded}
-
   def infer(model, input) do
-    # Ensure input is a tensor
     input_tensor = Nx.tensor(input)
-
-    # Do inference (assuming model is a {model, params} tuple)
     {compiled_model, params} = model
     Axon.predict(compiled_model, params, input_tensor)
   end
 
-def activate_tokens(%SemanticInput{token_structs: tokens} = semantic) do
-  updated_tokens =
-    Enum.map(tokens, fn token ->
-      activated = activate_cells(token)
-      Brain.get_or_start(activated.phrase)
-      activated
-    end)
+  # ── SAFE ACTIVATION: single site, filtered, time-bounded ─────────────────────
 
-  %{semantic | token_structs: updated_tokens}
-end
+  def activate_tokens(%SemanticInput{token_structs: tokens} = semantic) do
+    phrases =
+      tokens
+      |> Enum.map(& &1.phrase)
+      |> Enum.uniq()
+      |> Enum.reject(&skip_activation?/1)
+
+    # Make any lingering blockers impossible
+    Task.Supervisor.async_stream_nolink(
+      Core.TaskSup,
+      phrases,
+      &Brain.get_or_start/1,
+      max_concurrency: 4,
+      timeout: 3_000,
+      on_timeout: :kill_task
+    )
+    |> Stream.run()
+
+    semantic
+  end
+
+  # Functional phrases (e.g., "what is", "see you"), multiword phrases, and tiny tokens
+  # should NEVER trigger enrichment or process starts.
+  defp skip_activation?(p) do
+    String.length(p) < 3 or String.contains?(p, " ") or match?([_ | _], Core.MultiwordPOS.lookup(p))
+  end
 
   @doc """
   Master pipeline: from raw input to fully processed SemanticInput.
   """
-
-def resolve_input(input) when is_binary(input) do
-  input
-  |> Tokenizer.tokenize()
-  |> Core.activate_tokens()
-  |> POSEngine.tag()
-  |> IntentClassifier.classify_tokens()
-  |> IntentResolver.resolve_intent()
-  |> MoodCore.attach_mood()
-  |> ResponsePlanner.analyze()
-  |> then(&{:ok, &1})
-end
-
-  # Token → ensure BrainCell is started
-  def activate_cells(%Token{phrase: phrase} = token) do
-    case Brain.get_all(phrase) do
-      [] -> 
-        LexiconEnricher.enrich  token.text
-        activate_cells token
-      cells ->
-        Enum.each(cells, &Brain.ensure_started/1)
-        token
-    end
+  def resolve_input(input) when is_binary(input) do
+    input
+    |> Tokenizer.tokenize()
+    |> Core.activate_tokens()
+    |> POSEngine.tag()
+    |> IntentClassifier.classify_tokens()
+    |> IntentResolver.resolve_intent()
+    |> MoodCore.attach_mood()
+    |> ResponsePlanner.analyze()
+    |> then(&{:ok, &1})
   end
 
-  # Token → attach BrainCell info (pos, keyword, etc.)
+  # ── DEPRECATED / NO-OP ACTIVATION HELPERS ────────────────────────────────────
+  # These used to recurse + enrich. That caused the lockups on "what is"/"see you".
+  # Keep them as no-ops or pure lookups if other code still calls them.
+
+  # Token → (no side effects) return as-is; activation is centralized above.
+  def activate_cells(%Token{} = token), do: token
+
+  # Token → attach a DB cell if already present; DO NOT start/enrich here.
   def update_token_with_cell(%Token{phrase: phrase} = token) do
     case Brain.get_all(phrase) do
       [%BrainCell{} = cell | _] ->
-        Brain.ensure_running(cell)
         %{token | cell: cell, pos: cell.pos, keyword: cell.word}
 
       _ ->
-        Logger.warning("⚠️ No BrainCell found for #{inspect(phrase)}")
+        Logger.debug("No BrainCell found for #{inspect(phrase)} (skipping)")
         token
     end
   end
 
-  # Deprecated: separate enrich call (handled now in other flows)
-  defp enrich_if_missing(word) do
-    case LexiconEnricher.enrich(word) do
-      {:ok, cells} ->
-        Enum.each(cells, &store_cell/1)
-        cells
-
-      {:error, reason} ->
-        Logger.warning("⚠️ Enrichment failed for '#{word}': #{inspect(reason)}")
-        []
-    end
-  end
-
-  defp store_cell(%BrainCell{} = cell) do
-    normalized =
-      cell
-      |> Map.from_struct()
-      |> Map.drop([:__meta__, :__struct__])
-      |> then(&struct(BrainCell, &1))
-
-    unless DB.cell_exists?(normalized.id) do
-      DB.insert_cell!(normalized)
-    end
-
-    Brain.store(normalized)
-  end
-
-  # (Optional) legacy fallback hook
+  # Optional legacy helpers (left intact if referenced elsewhere)
   def resolve_and_classify(input), do: resolve_input(input)
 end
 
