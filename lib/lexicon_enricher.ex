@@ -1,25 +1,23 @@
 defmodule LexiconEnricher do
   @moduledoc """
   Pure enrichment module. Fetches word data from a remote API and builds BrainCell structs.
-  No DB interaction occurs here.
+  No DB interaction occurs here (except a single insert_all in fetch).
   """
 
   alias LexiconClient
   alias BrainCell
 
   @spec enrich(String.t()) :: {:ok, [BrainCell.t()]} | {:error, atom()}
-  def enrich(word) when is_binary(word) do
-    fetch_from_api(String.downcase(word))
-  end
-
+  def enrich(word) when is_binary(word), do: fetch_from_api(String.downcase(word))
   def enrich(_), do: {:error, :invalid_word}
 
   @spec update(String.t()) :: {:ok, [BrainCell.t()]} | {:error, atom()}
-  def update(word), do: fetch_from_api(String.downcase(word))
+  def update(word), do: enrich(word)
 
   defp fetch_from_api(word) do
     with {:ok, %{status: 200, body: [%{"word" => w, "meanings" => meanings} | _]}} <- LexiconClient.fetch_word(word),
          cells when is_list(cells) <- build_cells(w, meanings) do
+      # Emit structs; DB layer already handles inserting them
       Core.DB.insert_all(cells)
       {:ok, cells}
     else
@@ -29,35 +27,64 @@ defmodule LexiconEnricher do
     end
   end
 
+  # Build a list of %BrainCell{} structs robustly (missing keys, atom/string keys, etc.)
   defp build_cells(word, meanings) do
-    synonyms = (Enum.at( meanings, 0))["synonyms"]
-    Enum.flat_map(meanings, fn %{"partOfSpeech" => pos, "definitions" => defs} ->
-      Enum.with_index(defs, 1)
-      |> Enum.map(fn {%{"definition" => defn} = defmap, idx} ->
-        atoms = semantic_atoms(defn || "", defmap["synonyms"] || [])
+    word = norm(word)
+
+    meanings
+    |> List.wrap()
+    |> Enum.flat_map(fn meaning ->
+      pos      = get_in(meaning, ["partOfSpeech"]) || get_in(meaning, [:partOfSpeech]) || "unknown"
+      pos_syns = norm_list(List.wrap(meaning["synonyms"] || meaning[:synonyms]))
+      defs     = List.wrap(meaning["definitions"] || meaning[:definitions])
+
+      defs
+      |> Enum.with_index(1)
+      |> Enum.map(fn {defmap, idx} ->
+        defn    = norm(defmap["definition"] || defmap[:definition] || "")
+        example = norm(defmap["example"]    || defmap[:example]    || "")
+        d_syns  = norm_list(List.wrap(defmap["synonyms"]  || defmap[:synonyms]))
+        ants    = norm_list(List.wrap(defmap["antonyms"] || defmap[:antonyms]))
+        syns    = norm_list(pos_syns ++ d_syns, 128)
+        atoms   = semantic_atoms(defn, syns)
 
         %BrainCell{
           id: "#{word}|#{pos}|#{idx}",
           word: word,
           pos: pos,
-          definition: defn || "",
-          example: defmap["example"] || "",
-          synonyms: synonyms,
-          antonyms: defmap["antonyms"] || [],
+          definition: defn,
+          example: example,
+          synonyms: syns,
+          antonyms: ants,
           semantic_atoms: atoms,
           type: nil,
           function: nil,
           activation: 0.0,
+          modulated_activation: 0.0,
           serotonin: 1.0,
           dopamine: 1.0,
           connections: [],
           position: [0.0, 0.0, 0.0],
           status: :active,
-          last_dose_at: nil,
-          last_substance: nil
+          token_ids: []
         }
       end)
     end)
+  end
+
+  # --- helpers ---
+
+  defp norm(nil), do: ""
+  defp norm(s) when is_binary(s), do: s |> String.trim() |> :unicode.characters_to_nfc_binary()
+  defp norm(s), do: to_string(s) |> norm()
+
+  defp norm_list(list, cap \\ 64) do
+    list
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&norm/1)
+    |> Enum.uniq()
+    |> Enum.reject(&(&1 == "" or String.length(&1) <= 2))
+    |> Enum.take(cap)
   end
 
   defp semantic_atoms(_definition, synonyms) do
@@ -67,8 +94,7 @@ defmodule LexiconEnricher do
     |> Enum.reject(&too_short_or_common?/1)
   end
 
-  defp too_short_or_common?(word) do
-    String.length(word) <= 2 or word in ~w[to and the or of a an is in on at by for with from]
-  end
+  defp too_short_or_common?(w),
+    do: String.length(w) <= 2 or w in ~w[to and the or of a an is in on at by for with from]
 end
 

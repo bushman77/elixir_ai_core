@@ -3,6 +3,7 @@ defmodule ElixirAiCore.Application do
 
   def start(_type, _args) do
     children = [
+      {Task.Supervisor, name: Core.TaskSup},
       {Registry, keys: :unique, name: Core.Registry},
       {DynamicSupervisor, strategy: :one_for_one, name: BrainCellSupervisor},
       {ElixirAiCore.Supervisor, []}, # Assuming this is a custom supervisor

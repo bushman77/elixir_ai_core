@@ -2,61 +2,89 @@ defmodule Core.MultiwordMatcher do
   @moduledoc """
   Finds and merges known multiword expressions (MWEs) in a token stream.
   Also exposes POS overrides for merged phrases.
+
+  Sources:
+    • Core.MultiwordPOS.phrases/0 is the single source of truth.
+  Caching:
+    • Builds a first-token index once and caches it in :persistent_term.
+    • Call refresh!/0 after you modify phrase inventories.
   """
 
   alias Core.MultiwordPOS
 
-  @doc """
-  All known phrases (must be lowercase, space-separated).
-  Delegates to your MultiwordPOS to keep a single source of truth.
-  """
+  @cache_key {__MODULE__, :index}
+
+  # ── Public API ────────────────────────────────────────────────────────────────
+
+  @doc "All known phrases (lowercase, space-normalized)."
   @spec get_phrases() :: [binary()]
   def get_phrases, do: MultiwordPOS.phrases()
 
-  @doc """
-  POS override for a merged phrase (returns an atom tag or nil).
-  """
-  @spec pos_override(binary()) :: atom() | nil
+  @doc "POS override for a merged phrase (list of tags, [] if none)."
+  @spec pos_override(binary()) :: [atom()]
   def pos_override(phrase) when is_binary(phrase) do
-    # phrases are stored lowercase; normalize input
-    MultiwordPOS.lookup(String.downcase(phrase))
+    MultiwordPOS.lookup(String.downcase(phrase)) || []
   end
 
   @doc """
-  Merge a *list of downcased words* into phrases using longest-match-first.
+  Merge a list of **downcased** words into phrases using longest-match-first.
   Returns a list of strings where matched MWEs appear as a single element.
   """
   @spec merge_words([binary()]) :: [binary()]
   def merge_words(words) when is_list(words) do
-    {first_map, _maxlen} = phrase_index()
-
+    {first_map, _maxlen, _sig} = index()
     do_merge(words, first_map, [])
   end
 
-  # ---------- internal ----------
+  @doc """
+  Rebuild the cached index. Call after seeding/enrichment.
+  """
+  @spec refresh!() :: :ok
+  def refresh! do
+    phrases = get_phrases()
 
-  # Pre-index phrases by their first token, sort each bucket by length desc
-  # Returns {first_map, maxlen}
-  defp phrase_index do
-    phrases =
-      get_phrases()
+    # signature guards against stale cache if phrases change
+    sig =
+      :erlang.phash2(phrases)
+
+    tuples =
+      phrases
       |> Enum.map(fn p ->
         parts = String.split(p, ~r/\s+/, trim: true)
         {p, parts, length(parts)}
       end)
 
-    maxlen = Enum.reduce(phrases, 1, fn {_p, _parts, len}, acc -> max(acc, len) end)
+    maxlen = Enum.reduce(tuples, 1, fn {_p, _parts, len}, acc -> max(acc, len) end)
 
     first_map =
-      phrases
+      tuples
       |> Enum.group_by(fn {_p, parts, _len} -> hd(parts) end)
-      |> Enum.into(%{}, fn {first, lst} ->
-        # longest first to prefer the most specific match
-        sorted = Enum.sort_by(lst, fn {_p, _parts, len} -> -len end)
-        {first, sorted}
+      |> Map.new(fn {first, lst} ->
+        # longest-first to prefer most specific match
+        {first, Enum.sort_by(lst, fn {_p, _parts, len} -> -len end)}
       end)
 
-    {first_map, maxlen}
+    :persistent_term.put(@cache_key, {first_map, maxlen, sig})
+    :ok
+  end
+
+  # ── Internal ─────────────────────────────────────────────────────────────────
+
+  defp index do
+    case :persistent_term.get(@cache_key, :missing) do
+      :missing ->
+        refresh!()
+        :persistent_term.get(@cache_key)
+
+      {first_map, maxlen, sig} = cached ->
+        # If phrases changed (dev), rebuild automatically
+        if sig != :erlang.phash2(get_phrases()) do
+          refresh!()
+          :persistent_term.get(@cache_key)
+        else
+          cached
+        end
+    end
   end
 
   defp do_merge([], _first_map, acc), do: Enum.reverse(acc)
@@ -67,7 +95,6 @@ defmodule Core.MultiwordMatcher do
         do_merge(rest, first_map, [w | acc])
 
       candidates ->
-        # try each candidate (already longest-first) and take the first that fits
         case try_match(words, candidates) do
           {:ok, phrase, skip} ->
             do_merge(Enum.drop(words, skip), first_map, [phrase | acc])
