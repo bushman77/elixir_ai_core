@@ -21,6 +21,7 @@ defmodule Core do
   # alias LexiconEnricher   # ← not needed in this module anymore (Brain handles enrichment)
   # alias MoodCore          # keep if used below
 
+
   @spec infer(Axon.Model.t(), Nx.Tensor.t() | list()) :: any()
   def infer(nil, _input), do: {:error, :no_model_loaded}
   def infer(model, input) do
@@ -31,26 +32,25 @@ defmodule Core do
 
   # ── SAFE ACTIVATION: single site, filtered, time-bounded ─────────────────────
 
-  def activate_tokens(%SemanticInput{token_structs: tokens} = semantic) do
-    phrases =
-      tokens
-      |> Enum.map(& &1.phrase)
-      |> Enum.uniq()
-      |> Enum.reject(&skip_activation?/1)
+def activate_tokens(%SemanticInput{token_structs: tokens} = semantic) do
+  phrases =
+    tokens
+    |> Enum.map(& &1.phrase)
+    |> Enum.uniq()
+    |> Enum.reject(&skip_activation?/1)
 
-    # Make any lingering blockers impossible
-    Task.Supervisor.async_stream_nolink(
-      Core.TaskSup,
-      phrases,
-      &Brain.get_or_start/1,
-      max_concurrency: 4,
-      timeout: 3_000,
-      on_timeout: :kill_task
-    )
-    |> Stream.run()
+  Task.Supervisor.async_stream_nolink(
+    Core.TaskSup, phrases, &Brain.get_or_start/1,
+    max_concurrency: 4, timeout: 3_000, on_timeout: :kill_task
+  )
+  |> Stream.run()
 
-    semantic
-  end
+  # fill attention (use only the tokens we didn’t skip)
+  kept_tokens = Enum.filter(tokens, fn t -> not skip_activation?(t.phrase) end)
+  _cells = Brain.attention(kept_tokens)
+
+  semantic
+end
 
   # Functional phrases (e.g., "what is", "see you"), multiword phrases, and tiny tokens
   # should NEVER trigger enrichment or process starts.
@@ -61,17 +61,22 @@ defmodule Core do
   @doc """
   Master pipeline: from raw input to fully processed SemanticInput.
   """
-  def resolve_input(input) when is_binary(input) do
-    input
-    |> Tokenizer.tokenize()
-    |> Core.activate_tokens()
-    |> POSEngine.tag()
-    |> IntentClassifier.classify_tokens()
-    |> IntentResolver.resolve_intent()
-    |> MoodCore.attach_mood()
-    |> ResponsePlanner.analyze()
-    |> then(&{:ok, &1})
-  end
+# in lib/core.ex, inside resolve_input/1
+def resolve_input(input) when is_binary(input) do
+  input
+  |> Tokenizer.tokenize()
+  |> Core.activate_tokens()
+  |> POSEngine.tag()
+  |> then(fn sem ->
+    chosen = POSDisambiguator.disambiguate(sem.token_structs)
+    Map.put(sem, :chosen_cells, chosen)   # %{index => %BrainCell{}}
+  end)
+  |> IntentClassifier.classify_tokens()
+  |> IntentResolver.resolve_intent()
+  |> MoodCore.attach_mood()
+  |> ResponsePlanner.analyze()
+  |> then(&{:ok, &1})
+end
 
   # ── DEPRECATED / NO-OP ACTIVATION HELPERS ────────────────────────────────────
   # These used to recurse + enrich. That caused the lockups on "what is"/"see you".

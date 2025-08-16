@@ -5,7 +5,6 @@ defmodule Core.IntentClassifier do
   """
 
   alias Core.POS
-  alias Core.SemanticInput
 
   # Keep your patterns; we’ll just score them instead of boolean matching.
   @intent_patterns %{

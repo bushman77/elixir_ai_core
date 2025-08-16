@@ -1,7 +1,7 @@
 defmodule LexiconEnricher do
   @moduledoc """
   Pure enrichment module. Fetches word data from a remote API and builds BrainCell structs.
-  No DB interaction occurs here (except a single insert_all in fetch).
+  No DB interaction occurs here — Brain owns persistence and process lifecycle.
   """
 
   alias LexiconClient
@@ -17,9 +17,7 @@ defmodule LexiconEnricher do
   defp fetch_from_api(word) do
     with {:ok, %{status: 200, body: [%{"word" => w, "meanings" => meanings} | _]}} <- LexiconClient.fetch_word(word),
          cells when is_list(cells) <- build_cells(w, meanings) do
-      # Emit structs; DB layer already handles inserting them
-      Core.DB.insert_all(cells)
-      {:ok, cells}
+      {:ok, cells}   # emit structs only
     else
       {:ok, %{status: 404}} -> {:error, :not_found}
       {:error, reason} -> {:error, reason}
@@ -27,7 +25,7 @@ defmodule LexiconEnricher do
     end
   end
 
-  # Build a list of %BrainCell{} structs robustly (missing keys, atom/string keys, etc.)
+  # Build a list of %BrainCell{} templates (no DB fields like token_id here)
   defp build_cells(word, meanings) do
     word = norm(word)
 
@@ -61,12 +59,12 @@ defmodule LexiconEnricher do
           function: nil,
           activation: 0.0,
           modulated_activation: 0.0,
-          serotonin: 1.0,
           dopamine: 1.0,
-          connections: [],
+          serotonin: 1.0,
+          connections: [],                 # {:array, :map} in schema
           position: [0.0, 0.0, 0.0],
-          status: :active,
-          token_ids: []
+          status: :active
+          # NOTE: no :token_id here; Brain.ensure_braincell/3 sets it
         }
       end)
     end)

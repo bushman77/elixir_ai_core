@@ -82,11 +82,11 @@ defmodule Core.PhraseDetector do
       type: :phrase,
       definition: nil,
       activation: 0.0,
-      dopamine: 0.0,
+     dopamine: 0.0,
       serotonin: 0.0
     })
 
-    # Enrich POS, definition, synonyms, etc. for the new phrase
+#    # Enrich POS, definition, synonyms, etc. for the new phrase
     LexiconEnricher.enrich(cell.word)
   end
 end

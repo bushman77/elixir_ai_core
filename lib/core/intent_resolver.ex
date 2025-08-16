@@ -4,11 +4,14 @@ defmodule Core.IntentResolver do
   Matrix is only used to upgrade low-confidence results.
   """
 
-  alias Core.{IntentMatrix, SemanticInput, Profanity}
+  alias Core.{IntentMatrix, SemanticInput, Profanity, IntentPosProfile}
   alias MoodCore
 
   @fallback_threshold Application.compile_env(:elixir_ai_core, :fallback_threshold, 0.55)
   @default_confidence 0.0
+  @pos_boost 0.20   # how much to nudge confidence by similarity
+  @min_conf  0.35   # if classifier is weak, POS can swing harder
+
 
   @spec resolve_intent(SemanticInput.t()) :: SemanticInput.t()
   def resolve_intent(%SemanticInput{} = sem) do
@@ -77,6 +80,40 @@ defmodule Core.IntentResolver do
   defp resolve_with_matrix_if_needed(%SemanticInput{} = sem), do: sem
 
   # ---------- positive reinforcement on clear greetings/thanks ----------
+
+defp maybe_refine_with_pos_profiles(%SemanticInput{pos_list: pos_list} = sem) do
+    pos_hist = FRP.Features |> :erlang.apply(:pos_histogram, [pos_list, IntentPOSProfile.tags()])
+    # score all intents
+    intents = [:greeting, :question, :how_to, :troubleshoot, :request, :confirm, :thanks, :goodbye, :insult, :unknown]
+
+    scored =
+      for intent <- intents do
+        {intent, IntentPOSProfile.score(pos_hist, intent)}
+      end
+      |> Enum.sort_by(fn {_i, s} -> -s end)
+
+    {best_intent, best_sim} = hd(scored)
+
+    sem =
+      cond do
+        sem.intent in [nil, :unknown] and best_sim > 0.5 ->
+          %{sem | intent: best_intent, source: :pos_refine, confidence: max(best_sim, sem.confidence || 0.0)}
+
+        sem.confidence && sem.confidence < @min_conf ->
+          # blend if initial confidence is weak
+          blended_conf = min(1.0, (sem.confidence * (1.0 - @pos_boost)) + best_sim * @pos_boost)
+          %{sem | intent: best_intent, source: :pos_refine, confidence: blended_conf}
+
+        true ->
+          # small nudge only: increase confidence toward POS similarity
+          nudged = min(1.0, (sem.confidence || 0.0) + @pos_boost * best_sim * 0.5)
+          %{sem | confidence: nudged}
+      end
+
+    # Online learn the prototype with the chosen intent (EMA)
+    IntentPOSProfile.observe(sem.intent || best_intent, pos_hist)
+    sem
+  end
 
   defp maybe_reinforce_positive(%SemanticInput{intent: intent, confidence: c} = sem)
        when intent in [:greeting, :thank] and is_number(c) and c >= 0.8 do

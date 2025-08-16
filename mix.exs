@@ -28,6 +28,7 @@ defp elixirc_paths(_),     do: ["lib"]
 
 defp deps do
   [
+{:pgvector, "~> 0.3"},
  {:axon, "~> 0.7.0"},
   {:nx, "~> 0.9.1"},
     {:jason, "~> 1.4"},

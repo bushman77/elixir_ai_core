@@ -1,14 +1,25 @@
 defmodule Core.ResponsePlanner do
   @moduledoc """
   Chooses a response based on SemanticInput (intent, keyword, confidence, mood, cell).
+  Adds a high-confidence 'grump' override using ML.GrumpModel for insults.
   """
 
   alias Core.{MemoryCore, SemanticInput}
+  alias ML.GrumpModel
   alias BrainCell
   alias PhraseGenerator
 
   @high_confidence 0.6
   @low_confidence  0.3
+
+  # Grump override settings
+  @grump_threshold 0.75  # was 0.85 — a touch more permissive
+
+  # keep this light; avoid anything sensitive
+  @mild_insult_regex ~r/\b(heck|darn|poo|poopy|noob|clown|loser|dummy|idiot|stupid)\b/i
+  @apology_regex      ~r/\b(sorry|my\s+bad|apolog(?:y|ize|ising|izing))\b/i
+  
+@grump_blocklist ~w(race religion gender sexuality slur slurs hate violent kill die nazi)
 
   @greeting_msgs [
     "Hey there! 👋 How can I assist you today?",
@@ -61,23 +72,24 @@ defmodule Core.ResponsePlanner do
   ]
 
   @doc "Attach a `response` and a tiny trace to the SemanticInput based on its fields."
-  @spec analyze(SemanticInput.t()) :: SemanticInput.t()
-  def analyze(%SemanticInput{} = sem) do
-    sem = %{sem | intent: normalize_intent(sem.intent)}
-    response = plan(sem)
+@spec analyze(SemanticInput.t()) :: SemanticInput.t()
+def analyze(%SemanticInput{} = sem) do
+  sem = %{sem | intent: normalize_intent(sem.intent)}
 
-    trace = %{
-      intent: sem.intent,
-      kw: sem.keyword,
-      conf: sem.confidence,
-      mood: sem.mood
-    }
+  response = plan(sem)
+  dbg = Process.get(:planner_dbg) || %{}   # ← pull debug from plan/1
 
-    %{sem | response: response, planned_response: response, activation_summary: trace}
-  end
+  trace = %{
+    intent: sem.intent,
+    kw: sem.keyword,
+    conf: sem.confidence,
+    mood: sem.mood
+  } |> Map.merge(dbg)
 
-  # ---------- Intent normalization (Suggestion #1) ----------
+  %{sem | response: response, planned_response: response, activation_summary: trace}
+end
 
+  # ---------- Intent normalization ----------
   defp normalize_intent(i) do
     case i do
       :greet    -> :greeting
@@ -94,16 +106,70 @@ defmodule Core.ResponsePlanner do
     end
   end
 
-  # ---------- Core dispatch (Suggestion #2: ordering) ----------
+  # ---------- Grump override → Core fallback ----------
+
+  # Top-level planner:
+# Order: apology → grump override → core flow
+defp plan(%SemanticInput{sentence: s, mood: mood} = sem) when is_binary(s) do
+  # default debug
+  dbg = %{path: :core, grump_label: nil, grump_conf: nil, mild_hit: false, safe: true}
+  Process.put(:planner_dbg, dbg)
+
+  # Apology short-circuit
+  if Regex.match?(@apology_regex, s) do
+    Process.put(:planner_dbg, Map.merge(dbg, %{path: :apology}))
+    return_apology_reply(mood)
+  else
+    {label, conf} = ML.GrumpModel.predict(s)
+    safe     = safe_for_grump?(s)
+    mild_hit = Regex.match?(@mild_insult_regex, s)
+
+    Process.put(:planner_dbg,
+      %{path: :grump_check, grump_label: label, grump_conf: conf, mild_hit: mild_hit, safe: safe})
+
+    if safe and ((label == "insult" and conf >= @grump_threshold) or mild_hit) do
+      Process.put(:planner_dbg, Map.merge(Process.get(:planner_dbg), %{path: :grump_reply}))
+      case mood do
+        :grumpy   -> Enum.random(@snarky_boundaries)
+        :negative -> Enum.random(@firm_boundaries)
+        _         -> Enum.random(@gentle_boundaries)
+      end
+    else
+      Process.put(:planner_dbg, Map.merge(Process.get(:planner_dbg), %{path: :core}))
+      plan_core(sem)
+    end
+  end
+end
+
+defp plan(sem), do: plan_core(sem)  # no sentence
+
+  defp return_apology_reply(mood) do
+    case mood do
+      :grumpy   -> "We’re good. Let’s move on. 👍"
+      :negative -> "Thanks for saying that. Let’s reset and keep going."
+      _         -> "All good! Thanks for the apology—how can I help now?"
+    end
+  end
+
+  defp maybe_grump(text) do
+    {label, conf} = GrumpModel.predict(text)
+    if label == "insult", do: {:insult, conf}, else: :neutral
+  end
+
+  defp safe_for_grump?(text) do
+    down = String.downcase(text)
+    not Enum.any?(@grump_blocklist, &String.contains?(down, &1))
+  end
+
+  # ---------- Original flow (moved to plan_core/*) ----------
 
   # 1) If a BrainCell is attached, use that for context-rich replies
-  defp plan(%SemanticInput{cell: %BrainCell{} = cell} = sem) do
+  defp plan_core(%SemanticInput{cell: %BrainCell{} = cell} = sem) do
     plan_by_cell(sem.intent, sem.confidence, sem.keyword, cell, sem.mood)
   end
 
   # 2) Explicit intents (before keyword fallback)
-
-  defp plan(%SemanticInput{intent: :greeting, mood: mood, confidence: conf}) do
+  defp plan_core(%SemanticInput{intent: :greeting, mood: mood, confidence: conf}) do
     case mood do
       :grumpy ->
         if conf >= @high_confidence and :rand.uniform() < 0.2,
@@ -116,9 +182,9 @@ defmodule Core.ResponsePlanner do
     end
   end
 
-  defp plan(%SemanticInput{intent: :farewell}), do: @farewell_msg
+  defp plan_core(%SemanticInput{intent: :farewell}), do: @farewell_msg
 
-  defp plan(%SemanticInput{intent: :insult, mood: mood}) do
+  defp plan_core(%SemanticInput{intent: :insult, mood: mood}) do
     case mood do
       :grumpy   -> Enum.random(@snarky_boundaries)
       :negative -> Enum.random(@firm_boundaries)
@@ -126,25 +192,25 @@ defmodule Core.ResponsePlanner do
     end
   end
 
-  defp plan(%SemanticInput{intent: :thank, confidence: conf}) do
+  defp plan_core(%SemanticInput{intent: :thank, confidence: conf}) do
     if conf >= @low_confidence,
       do: "You're welcome! Anything else you need?",
       else: "I think you’re thanking me—happy to help!"
   end
 
-  defp plan(%SemanticInput{intent: :confirm, confidence: conf}) do
+  defp plan_core(%SemanticInput{intent: :confirm, confidence: conf}) do
     if conf >= @low_confidence,
       do: "Great—I'll proceed.",
       else: "Sounds like a yes—should I go ahead?"
   end
 
-  defp plan(%SemanticInput{intent: :deny, confidence: conf}) do
+  defp plan_core(%SemanticInput{intent: :deny, confidence: conf}) do
     if conf >= @low_confidence,
       do: "No problem. I won’t do that.",
       else: "Got it—do you want something else instead?"
   end
 
-  defp plan(%SemanticInput{intent: :command, keyword: kw, confidence: conf}) do
+  defp plan_core(%SemanticInput{intent: :command, keyword: kw, confidence: conf}) do
     cond do
       conf < @low_confidence ->
         "I think you're asking me to do something#{if kw, do: " with \"#{kw}\""}—mind clarifying?"
@@ -157,7 +223,7 @@ defmodule Core.ResponsePlanner do
     end
   end
 
-  defp plan(%SemanticInput{intent: :inform, keyword: kw, confidence: conf}) do
+  defp plan_core(%SemanticInput{intent: :inform, keyword: kw, confidence: conf}) do
     if conf >= @low_confidence and kw do
       "Thanks for the info about \"#{kw}\". Want me to log or use that?"
     else
@@ -165,7 +231,7 @@ defmodule Core.ResponsePlanner do
     end
   end
 
-  defp plan(%SemanticInput{intent: :why, confidence: conf, keyword: kw}) do
+  defp plan_core(%SemanticInput{intent: :why, confidence: conf, keyword: kw}) do
     msg =
       if conf >= @high_confidence, do: "Why is a great question.", else: "I think you’re asking why."
 
@@ -176,7 +242,7 @@ defmodule Core.ResponsePlanner do
       end
   end
 
-  defp plan(%SemanticInput{intent: :question, keyword: kw, confidence: conf}) do
+  defp plan_core(%SemanticInput{intent: :question, keyword: kw, confidence: conf}) do
     cond do
       conf >= @high_confidence and kw in ["time", "price", "weather"] ->
         "Great question about \"#{kw}\". I can help with that."
@@ -193,13 +259,13 @@ defmodule Core.ResponsePlanner do
   end
 
   # 3) Keyword-based generic fallback (after explicit handlers)
-  defp plan(%SemanticInput{keyword: kw} = sem) when not is_nil(kw) do
+  defp plan_core(%SemanticInput{keyword: kw} = sem) when not is_nil(kw) do
     plan_by_keyword(sem.intent, sem.confidence, kw)
   end
 
   # 4) Low-confidence or unknown
-  defp plan(%SemanticInput{confidence: conf}) when conf <= 0.0, do: @clarify_msg
-  defp plan(_), do: @clarify_msg
+  defp plan_core(%SemanticInput{confidence: conf}) when conf <= 0.0, do: @clarify_msg
+  defp plan_core(_), do: @clarify_msg
 
   # ---------- Cell-based planning helpers (kept intact) ----------
 
@@ -242,8 +308,7 @@ defmodule Core.ResponsePlanner do
     "That wasn't very nice."
   end
 
-  # ---------- Keyword-only planning (Suggestion #3) ----------
-
+  # ---------- Keyword-only planning ----------
   defp plan_by_keyword(:greeting, _conf, _kw),
     do: Enum.random(@greeting_msgs)
 

@@ -1,0 +1,1 @@
+{"max_len":16,"epochs":6,"batch_size":32,"vocab_size":240,"pad_id":0,"unk_id":1,"classes":["neutral","insult"]}

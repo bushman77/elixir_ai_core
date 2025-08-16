@@ -1,14 +1,18 @@
 defmodule Brain do
   use GenServer
 
-  alias Core.{SemanticInput, Token, DB}
+  alias Core.{SemanticInput, Token, DB, Vocab}
   alias BrainCell
   alias LexiconEnricher
-
+alias Core.IntentPOSProfile
   import Ecto.Query, only: [from: 2]
 
   @registry Core.Registry
   @name __MODULE__
+  @embedding_dim 256
+
+  @k 4         # keep top-k POS for the winning intent
+  @atten 0.6   # multiply activation by this for non-matching POS
 
   ## ── Public API ────────────────────────────────────────────────────────────────
 
@@ -19,6 +23,13 @@ defmodule Brain do
       name: @name
     )
   end
+@doc "Registers an activation event for a brain cell by ID."
+@spec register_activation(String.t()) :: :ok
+def register_activation(id) when is_binary(id) do
+  GenServer.cast(@name, {:activation, id, System.system_time(:second)})
+  :ok
+end
+
 
   @spec attention([Token.t()]) :: [BrainCell.t()]
   def attention(token_list), do: GenServer.call(@name, {:attention, token_list})
@@ -54,72 +65,47 @@ defmodule Brain do
   Returns {:ok, pids} (may be empty) or {:error, reason}.
   """
   @spec get_or_start(String.t()) :: {:ok, [pid()]} | {:error, term()}
-# lib/brain.ex
-def get_or_start(word) when is_binary(word) do
-  w = String.downcase(word)
+  def get_or_start(word) when is_binary(word) do
+    w = String.downcase(word)
 
-  short?      = String.length(w) < 3
-  multiword?  = String.contains?(w, " ")
-  functional? = match?([_ | _], Core.MultiwordPOS.lookup(w))
+    short?      = String.length(w) < 3
+    multiword?  = String.contains?(w, " ")
+    functional? = match?([_ | _], Core.MultiwordPOS.lookup(w))
 
-if short? or multiword? or functional? do
-    {:ok, []}
-  else
-    do_get_or_start(w)
-  end
-
-end
-
-defp do_get_or_start(word_id) do
-  if Application.get_env(:elixir_ai_core, :enrichment_enabled, false) do
-    case DB.get_braincells_by_word(word_id) do
-      [] ->
-        case LexiconEnricher.enrich(word_id) do
-          {:ok, cells} when is_list(cells) ->
-            Enum.each(cells, &ensure_cell_started/1)
-            {:ok, []}
-          _ ->
-            {:error, :not_found}
-        end
-
-      cells ->
-        Enum.each(cells, &ensure_cell_started/1)
-        {:ok, []}
-    end
-  else
-    case DB.get_braincells_by_word(word_id) do
-      []    -> {:error, :enrichment_disabled}
-      cells -> Enum.each(cells, &ensure_cell_started/1); {:ok, []}
+    if short? or multiword? or functional? do
+      {:ok, []}
+    else
+      do_get_or_start(w)
     end
   end
+
+
+defp update_braincell_connections(id, new_connections) do
+  DB.get!(BrainCell, id)                           # ⟵ was: id |> DB.get!(BrainCell)
+  |> BrainCell.changeset(%{connections: new_connections})
+  |> DB.update!()
 end
 
-  @doc "Registers an activation event for a brain cell by ID."
-  def register_activation(id),
-    do: GenServer.cast(@name, {:activation, id, System.system_time(:second)})
-
-  @doc "Returns the current internal state of the brain."
-  def get_state, do: GenServer.call(@name, :get_state)
 
   ## ── GenServer Callbacks ──────────────────────────────────────────────────────
 
   @impl true
   def init(state), do: {:ok, state}
 
-  @impl true
-  def handle_call({:attention, tokens}, _from, state) do
-    {found_cells, new_attention} =
-      Enum.reduce(tokens, {[], state.attention}, fn %Token{phrase: phrase}, {acc, attn} ->
-        case get(phrase) do
-          %BrainCell{} = cell -> {[cell | acc], MapSet.put(attn, cell.id)}
-          _ -> {acc, attn}
-        end
-      end)
+@impl true
+def handle_call({:attention, tokens}, _from, state) do
+  cells =
+    tokens
+    |> Enum.flat_map(&get_all/1)   # fetch all "word|pos|idx" rows for each phrase
 
-    strengthen_connections(found_cells)
+  new_attention =
+    Enum.reduce(cells, state.attention, fn c, attn -> MapSet.put(attn, c.id) end)
 
-    {:reply, Enum.reverse(found_cells), %{state | attention: new_attention}}
-  end
+  strengthen_connections(cells)
+  Enum.each(cells, &register_activation(&1.id))  # optional: log the activations
+
+  {:reply, cells, %{state | attention: new_attention}}
+end
 
   @impl true
   def handle_call({:get_cells, %Token{phrase: phrase}}, _from, state) do
@@ -308,17 +294,177 @@ end
   @spec ensure_started(BrainCell.t() | Token.t() | String.t()) ::
           {:ok, pid()} | :ok | {:error, term()}
   def ensure_started(%BrainCell{} = cell), do: ensure_cell_started(cell)
-
-  def ensure_started(%Token{phrase: phrase}), do:
-    phrase |> get_or_start() |> first_pid_or_ok()
-
-  def ensure_started(phrase) when is_binary(phrase), do:
-    phrase |> get_or_start() |> first_pid_or_ok()
-
+  def ensure_started(%Token{phrase: phrase}), do: phrase |> get_or_start() |> first_pid_or_ok()
+  def ensure_started(phrase) when is_binary(phrase), do: phrase |> get_or_start() |> first_pid_or_ok()
   defp first_pid_or_ok({:ok, [pid | _]}), do: {:ok, pid}
   defp first_pid_or_ok({:ok, []}),        do: :ok
   defp first_pid_or_ok(other),            do: other
 
+  ## ── ID helpers ───────────────────────────────────────────────────────────────
+
+  defp id_for(word, pos, sense_index), do: "#{word}|#{pos}|#{sense_index}"
+
+  defp parse_idx!(id) do
+    case String.split(id, "|") do
+      [_w, _p, idx] -> String.to_integer(idx)
+      _ -> raise ArgumentError, "bad id format: #{inspect(id)}"
+    end
+  end
+
+  defp next_index_for(word, pos) do
+    ids =
+      DB.all(
+        from c in BrainCell,
+          where: c.word == ^word and c.pos == ^pos,
+          select: c.id
+      )
+
+    case ids do
+      [] -> 1
+      ids -> ids |> Enum.map(&parse_idx!/1) |> Enum.max() |> Kernel.+(1)
+    end
+  end
+
+  ## ── BrainCell creation (composite id "word|pos|idx") ─────────────────────────
+
+  def ensure_braincell(word, pos, opts \\ []) when is_binary(word) and is_binary(pos) do
+    sense_index = Keyword.get(opts, :sense_index) || next_index_for(word, pos)
+    id = id_for(word, pos, sense_index)
+
+    case DB.get(BrainCell, id) do
+      nil ->
+        token_id =
+          case Vocab.get(word) do
+            nil -> Vocab.upsert!(word).id
+            v -> v.id
+          end
+
+        embedding = nil
+        # Uncomment if you want a deterministic placeholder before training
+        # embedding = deterministic_vec(token_id, @embedding_dim)
+
+        %BrainCell{
+          id: id,
+          word: word,
+          pos: pos,
+          token_id: token_id,
+          embedding: embedding,
+          embedding_model: if(embedding, do: "placeholder-#{@embedding_dim}"),
+          embedding_updated_at: if(embedding, do: NaiveDateTime.utc_now())
+        }
+        |> BrainCell.changeset(%{})
+        |> DB.insert!()
+
+      cell ->
+        cell
+    end
+  end
+
+  # Optional deterministic placeholder until you have a trained embedding layer
+  defp deterministic_vec(token_id, dim) do
+    a = rem(token_id, 65_536)
+    b = rem(div(token_id, 65_536), 65_536)
+    :rand.seed_s(:exsss, {a, b, 12345})
+    vec = for _ <- 1..dim, do: :rand.uniform() - 0.5
+    norm = :math.sqrt(Enum.reduce(vec, 0.0, fn x, acc -> acc + x * x end))
+    Enum.map(vec, & &1 / (norm + 1.0e-8))
+  end
+
+  ## ── Enrichment & startup ─────────────────────────────────────────────────────
+
+  defp do_get_or_start(word_id) do
+    if Application.get_env(:elixir_ai_core, :enrichment_enabled, false) do
+      case DB.get_braincells_by_word(word_id) do
+        [] ->
+          case LexiconEnricher.enrich(word_id) do
+            {:ok, cells} when is_list(cells) ->
+              cells
+              |> Enum.each(fn tmpl ->
+                idx  = parse_idx!(tmpl.id)
+                cell = ensure_braincell(tmpl.word, tmpl.pos, sense_index: idx)
+
+                # Upsert lexical payload from template
+                changes = %{
+                  definition:     tmpl.definition,
+                  example:        tmpl.example,
+                  synonyms:       tmpl.synonyms,
+                  antonyms:       tmpl.antonyms,
+                  semantic_atoms: tmpl.semantic_atoms,
+                  type:           tmpl.type,
+                  function:       tmpl.function,
+                  status:         tmpl.status
+                }
+
+                cell
+                |> BrainCell.changeset(changes)
+                |> DB.update!()
+                |> ensure_cell_started()
+              end)
+
+              {:ok, []}
+
+            _ ->
+              {:error, :not_found}
+          end
+
+        cells ->
+          Enum.each(cells, &ensure_cell_started/1)
+          {:ok, []}
+      end
+    else
+      case DB.get_braincells_by_word(word_id) do
+        []    -> {:error, :enrichment_disabled}
+        cells -> Enum.each(cells, &ensure_cell_started/1); {:ok, []}
+      end
+    end
+  end
+
+def prune_by_intent_pos(intent) do
+    tags = IntentPOSProfile.tags()
+    proto = IntentPOSProfile.get(intent)
+
+    top_k_pos =
+      proto
+      |> Enum.with_index()
+      |> Enum.sort_by(fn {v, _i} -> -v end)
+      |> Enum.take(@k)
+      |> Enum.map(fn {_v, i} -> Enum.at(tags, i) end)
+      |> MapSet.new()
+
+    state = :sys.get_state(Brain)
+    Enum.each(state.active_cells, fn {cell_id, pid} ->
+      pos = pos_of(cell_id)    # implement from your id format e.g. "word|pos|sense"
+      if not MapSet.member?(top_k_pos, pos) do
+        # Soft prune: message to dampen or lower activation
+        GenServer.cast(pid, {:attenuate, @atten})
+        # Hard prune option (when sem.confidence is high):
+        # Process.exit(pid, :normal)
+      end
+    end)
+
+    :ok
+  end
+
+  defp pos_of(id) do
+    # "hello|interjection|3" -> :intj, etc. map your labels as needed
+    [_w, pos, _sense] = String.split(id, "|")
+    case pos do
+      "noun" -> :noun
+      "verb" -> :verb
+      "adjective" -> :adj
+      "adverb" -> :adv
+      "pronoun" -> :pron
+      "determiner" -> :det
+      "aux" -> :aux
+      "adposition" -> :adp
+      "conjunction" -> :conj
+      "numeral" -> :num
+      "particle" -> :part
+      "interjection" -> :intj
+      "punct" -> :punct
+      _ -> :unknown
+    end
+  end
 
 end
 

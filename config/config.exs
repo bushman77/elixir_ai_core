@@ -12,5 +12,6 @@ config :elixir_ai_core, Core.DB,
   database: "brain",
   hostname: "localhost",
   show_sensitive_data_on_connection_error: true,
-  pool_size: 10
+  pool_size: 10,
+  types: ElixirAiCore.PostgrexTypes
 
