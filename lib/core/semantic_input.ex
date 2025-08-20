@@ -8,6 +8,10 @@ defmodule Core.SemanticInput do
   @type mood_t :: atom() | nil
   @type source_t :: :user | :system | :test | atom() | nil
 
+  @type llm_ctx_t :: [integer] | nil
+  @type llm_model_t :: String.t() | nil
+  @type llm_system_t :: String.t() | nil
+
   @type t :: %__MODULE__{
           # NEW: preserve exact user text
           original_sentence: String.t() | nil,
@@ -40,7 +44,15 @@ defmodule Core.SemanticInput do
           # Response planning/runtime conveniences
           cell: BrainCell.t() | map() | nil,
           response: String.t() | nil,
-          planned_response: String.t() | nil
+          planned_response: String.t() | nil,
+
+          # ── NEW: LLM session state ─────────────────────────────────────────────
+          # Raw token buffer from Ollama (or compatible server)
+          llm_ctx: llm_ctx_t,
+          # Which model produced/consumes that buffer (guards against mismatches)
+          llm_model: llm_model_t,
+          # Optional: the active system/persona prompt used for this session
+          llm_system: llm_system_t
         }
 
   defstruct [
@@ -64,7 +76,21 @@ defmodule Core.SemanticInput do
     :pattern_roles,
     :cell,
     :response,
-    :planned_response
+    :planned_response,
+    # ── NEW LLM fields (default nil keeps this fully backward-compatible) ──
+    :llm_ctx,
+    :llm_model,
+    :llm_system
   ]
+
+# ✅ use %__MODULE__{} here (or %Core.SemanticInput{})
+  def sanitize(%__MODULE__{token_structs: toks} = input) do
+    pruned =
+      toks
+      |> Enum.reject(&(&1.source in [:console, :command, :debug]))
+      |> Enum.reject(&(&1.phrase =~ ~r/^\s*$/))
+
+    %{input | token_structs: pruned}
+  end
 end
 

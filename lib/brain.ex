@@ -4,35 +4,67 @@ defmodule Brain do
   alias Core.{SemanticInput, Token, DB, Vocab}
   alias BrainCell
   alias LexiconEnricher
-alias Core.IntentPOSProfile
+  alias Core.IntentPOSProfile
   import Ecto.Query, only: [from: 2]
 
   @registry Core.Registry
   @name __MODULE__
   @embedding_dim 256
 
-  @k 4         # keep top-k POS for the winning intent
-  @atten 0.6   # multiply activation by this for non-matching POS
+  @k 4          # keep top-k POS for the winning intent
+  @atten 0.6    # multiply activation by this for non-matching POS
 
-  ## ── Public API ────────────────────────────────────────────────────────────────
+  # Background work caps / knobs
+  @strengthen_max_pairs 80
+  @activation_log_max  100
+
+  ## ── Public API ───────────────────────────────────────────────────────────────
 
   def start_link(_args) do
     GenServer.start_link(
       __MODULE__,
-      %{active_cells: %{}, activation_log: [], attention: MapSet.new()},
+      %{
+        active_cells: %{},
+        activation_log: [],
+        attention: MapSet.new(),
+      llm_ctx: nil,
+      llm_model: nil,
+      llm_max: 8192,
+      llm_ctx_updated_at: nil
+      },
       name: @name
     )
   end
-@doc "Registers an activation event for a brain cell by ID."
-@spec register_activation(String.t()) :: :ok
+
+  # async update (what you asked for)
+  def set_llm_ctx(ctx, model \\ nil),
+    do: GenServer.cast(__MODULE__, {:set_llm_ctx, ctx, model})
+
+  # convenience: clear/reset
+  def clear_llm_ctx, do: GenServer.cast(__MODULE__, :clear_llm_ctx)
+
+  # read (sync)
+  def get_llm_ctx, do: GenServer.call(__MODULE__, :get_llm_ctx)
+
+
+  @doc "Fast snapshot (attention / activation_log / active_cells) without :sys.get_state/1."
+  def snapshot(), do: GenServer.call(@name, :snapshot)
+
+  @doc "Registers an activation event for a brain cell by ID."
+  @spec register_activation(String.t()) :: :ok
 def register_activation(id) when is_binary(id) do
-  GenServer.cast(@name, {:activation, id, System.system_time(:second)})
+  GenServer.cast(@name, {:activation, id, System.system_time(:millisecond)})
   :ok
 end
-
-
   @spec attention([Token.t()]) :: [BrainCell.t()]
   def attention(token_list), do: GenServer.call(@name, {:attention, token_list})
+
+# in brain.ex
+def attention_phrases(list) when is_list(list) do
+  tokens = Enum.map(list, &%Core.Token{phrase: &1})
+  attention(tokens)
+end
+
 
   @spec get_all_phrases() :: [String.t()]
   def get_all_phrases do
@@ -79,32 +111,48 @@ end
     end
   end
 
-
-defp update_braincell_connections(id, new_connections) do
-  DB.get!(BrainCell, id)                           # ⟵ was: id |> DB.get!(BrainCell)
-  |> BrainCell.changeset(%{connections: new_connections})
-  |> DB.update!()
-end
-
-
   ## ── GenServer Callbacks ──────────────────────────────────────────────────────
 
   @impl true
   def init(state), do: {:ok, state}
 
+  @impl true
+  def handle_call(:snapshot, _from, state) do
+    reply = Map.take(state, [:attention, :activation_log, :active_cells])
+    {:reply, reply, state}
+  end
+
 @impl true
 def handle_call({:attention, tokens}, _from, state) do
-  cells =
+  # DB-backed cells (may be empty initially)
+  cells = tokens |> Enum.flat_map(&get_all/1)
+  ids   = Enum.map(cells, & &1.id)
+
+  # Fallback to phrases so we still log activity on a cold start
+  phrases =
     tokens
-    |> Enum.flat_map(&get_all/1)   # fetch all "word|pos|idx" rows for each phrase
+    |> Enum.map(fn
+      %Token{phrase: p} when is_binary(p) -> String.downcase(p)
+      other -> to_string(other)
+    end)
 
-  new_attention =
-    Enum.reduce(cells, state.attention, fn c, attn -> MapSet.put(attn, c.id) end)
+  log_ids = if ids == [], do: phrases, else: ids
 
-  strengthen_connections(cells)
-  Enum.each(cells, &register_activation(&1.id))  # optional: log the activations
+  new_attention = Enum.reduce(log_ids, state.attention, &MapSet.put(&2, &1))
+  ts = System.system_time(:millisecond)
 
-  {:reply, cells, %{state | attention: new_attention}}
+  new_log =
+    log_ids
+    |> Enum.map(&%{id: &1, at: ts})
+    |> Kernel.++(state.activation_log)
+    |> Enum.take(@activation_log_max)
+
+  if log_ids != [] do
+    Process.send_after(self(), {:after_attention, log_ids}, 0)
+    Enum.each(log_ids, &register_activation/1)
+  end
+
+  {:reply, cells, %{state | attention: new_attention, activation_log: new_log}}
 end
 
   @impl true
@@ -124,7 +172,7 @@ end
 
   @impl true
   def handle_cast({:activation, id, ts}, state) do
-    updated_log = [%{id: id, at: ts} | Enum.take(state.activation_log, 99)]
+    updated_log = [%{id: id, at: ts} | Enum.take(state.activation_log, @activation_log_max - 1)]
 
     if function_exported?(MoodCore, :register_activation, 1) do
       with %BrainCell{} = cell <- get(id) do
@@ -140,32 +188,90 @@ end
     {:noreply, put_in(state.active_cells[id], pid)}
   end
 
-  ## ── Hebbian Helpers ──────────────────────────────────────────────────────────
-
-  defp strengthen_connections(cells) when length(cells) > 1 do
-    for a <- cells, b <- cells, a.id != b.id, do: increase_connection_strength(a, b)
+@impl true
+def handle_info({:after_attention, ids}, state) do
+  # ids may be phrases or cell IDs; normalize safely
+  if ids != [] and mailbox_ok?() do
+    strengthen_connections_lite_by_ids(ids)
   end
+  {:noreply, state}
+end
 
-  defp strengthen_connections(_), do: :ok
+
+  # Bounded, cross-word strengthening to avoid N^2 blowups.
+# Treat both "word|pos|idx" and "word" gracefully
+defp strengthen_connections_lite_by_ids(ids) when is_list(ids) do
+  cells =
+    ids
+    |> Enum.flat_map(&cells_for_id_or_phrase/1)   # returns a list of %BrainCell{}
+    |> Enum.filter(& &1)                          # drop nils just in case
+
+  # Need at least two distinct words to form pairs
+  groups = Enum.group_by(cells, & &1.word)
+  words  = Map.keys(groups)
+
+  if length(words) < 2 do
+    :ok
+  else
+    # Build unique, non-repeating word pairs without fragile integer ranges
+    pairs =
+      for {wa, ia} <- Enum.with_index(words),
+          {wb, ib} <- Enum.with_index(words),
+          ia < ib,
+          a <- Map.fetch!(groups, wa),
+          b <- Map.fetch!(groups, wb) do
+        {a, b}
+      end
+
+    pairs
+    |> Enum.take(@strengthen_max_pairs)
+    |> Enum.each(fn {a, b} -> increase_connection_strength(a, b) end)
+
+    :ok
+  end
+end
+
+defp cells_for_id_or_phrase(id_or_phrase) when is_binary(id_or_phrase) do
+  cond do
+    # Cell ID format "word|pos|idx"
+    String.contains?(id_or_phrase, "|") ->
+      case get(id_or_phrase) do
+        %BrainCell{} = c -> [c]
+        _ -> []
+      end
+
+    true ->
+      # Phrase: fetch all braincells for that word
+      DB.get_braincells_by_word(String.downcase(id_or_phrase)) || []
+  end
+end
 
   defp increase_connection_strength(from, to) do
     updated_connections =
       case Enum.find(from.connections, fn conn -> conn["to"] == to.id end) do
-        nil -> [%{"to" => to.id, "strength" => 0.1} | from.connections]
+        nil ->
+          [%{"to" => to.id, "strength" => 0.1} | from.connections]
+
         %{"to" => _to_id, "strength" => strength} ->
           rest = Enum.reject(from.connections, fn c -> c["to"] == to.id end)
           [%{"to" => to.id, "strength" => min(strength + 0.1, 1.0)} | rest]
       end
 
-    _ = update_braincell_connections(from.id, updated_connections)
+    _ = update_braincell_connections!(from.id, updated_connections)
     :ok
   end
 
-  defp update_braincell_connections(id, new_connections) do
-    id
-    |> DB.get!(BrainCell)
+  defp update_braincell_connections!(id, new_connections) do
+    DB.get!(BrainCell, id)
     |> BrainCell.changeset(%{connections: new_connections})
-    |> DB.update()
+    |> DB.update!()
+  end
+
+  defp mailbox_ok?() do
+    case Process.info(self(), :message_queue_len) do
+      {:message_queue_len, n} -> n < 200
+      _ -> true
+    end
   end
 
   ## ── Lookups ─────────────────────────────────────────────────────────────────
@@ -195,7 +301,7 @@ end
   defp normalize_start({:error, {:already_started, _}}), do: :ok
   defp normalize_start(other), do: other
 
-  ## ── Dataset Export ──────────────────────────────────────────────────────────
+  ## ── Dataset Export (unchanged) ───────────────────────────────────────────────
 
   @doc """
   Export labeled training pairs from BrainCell rows.
@@ -283,13 +389,6 @@ end
 
   @doc """
   Compatibility for older callers that use `Brain.ensure_started/1`.
-
-  Accepts:
-    * %BrainCell{} -> ensures that cell's process is running
-    * %Token{}     -> ensures processes for the token's phrase
-    * binary       -> ensures processes for the phrase (word)
-
-  Normalizes results so `{:already_started, pid}` becomes `{:ok, pid}`.
   """
   @spec ensure_started(BrainCell.t() | Token.t() | String.t()) ::
           {:ok, pid()} | :ok | {:error, term()}
@@ -340,8 +439,6 @@ end
           end
 
         embedding = nil
-        # Uncomment if you want a deterministic placeholder before training
-        # embedding = deterministic_vec(token_id, @embedding_dim)
 
         %BrainCell{
           id: id,
@@ -383,7 +480,6 @@ end
                 idx  = parse_idx!(tmpl.id)
                 cell = ensure_braincell(tmpl.word, tmpl.pos, sense_index: idx)
 
-                # Upsert lexical payload from template
                 changes = %{
                   definition:     tmpl.definition,
                   example:        tmpl.example,
@@ -419,8 +515,22 @@ end
     end
   end
 
-def prune_by_intent_pos(intent) do
-    tags = IntentPOSProfile.tags()
+  ## ── Pipe-friendly pruning (soft) ─────────────────────────────────────────────
+
+# Pipe-friendly: schedule pruning on the Brain process (not the caller).
+@doc "Pipe-friendly: tries to prune non-top POS for the current intent, but returns `sem` unchanged."
+def prune_by_intent_pos(%{intent: intent} = sem) when is_atom(intent) do
+  if pid = Process.whereis(@name) do
+    Process.send_after(pid, {:prune_soft, intent}, 0)
+  end
+  sem
+end
+
+def prune_by_intent_pos(sem), do: sem
+
+  @impl true
+  def handle_info({:prune_soft, intent}, state) do
+    tags  = IntentPOSProfile.tags()
     proto = IntentPOSProfile.get(intent)
 
     top_k_pos =
@@ -431,22 +541,17 @@ def prune_by_intent_pos(intent) do
       |> Enum.map(fn {_v, i} -> Enum.at(tags, i) end)
       |> MapSet.new()
 
-    state = :sys.get_state(Brain)
     Enum.each(state.active_cells, fn {cell_id, pid} ->
-      pos = pos_of(cell_id)    # implement from your id format e.g. "word|pos|sense"
+      pos = pos_of(cell_id)
       if not MapSet.member?(top_k_pos, pos) do
-        # Soft prune: message to dampen or lower activation
         GenServer.cast(pid, {:attenuate, @atten})
-        # Hard prune option (when sem.confidence is high):
-        # Process.exit(pid, :normal)
       end
     end)
 
-    :ok
+    {:noreply, state}
   end
 
   defp pos_of(id) do
-    # "hello|interjection|3" -> :intj, etc. map your labels as needed
     [_w, pos, _sense] = String.split(id, "|")
     case pos do
       "noun" -> :noun
@@ -464,6 +569,41 @@ def prune_by_intent_pos(intent) do
       "punct" -> :punct
       _ -> :unknown
     end
+  end
+
+
+  def handle_cast({:set_llm_ctx, ctx, model}, state) do
+    # keep model sticky unless caller provides a new one
+    m = model || state.llm_model
+
+    # optional guard: if model changes, you may want to reset instead
+    state =
+      if state.llm_model && m && state.llm_model != m do
+        %{state | llm_ctx: nil, llm_model: m}
+      else
+        state
+      end
+
+    trimmed = trim_ctx(ctx, state.llm_max)
+
+    {:noreply,
+     %{state |
+       llm_ctx: trimmed,
+       llm_model: m,
+       llm_ctx_updated_at: System.system_time(:millisecond)}}
+  end
+
+  def handle_cast(:clear_llm_ctx, state),
+    do: {:noreply, %{state | llm_ctx: nil, llm_model: nil}}
+
+  def handle_call(:get_llm_ctx, _from, state),
+    do: {:reply, %{ctx: state.llm_ctx, model: state.llm_model}, state}
+
+  # ── Helpers ───────────────────────────────────────────────────────────────
+  defp trim_ctx(nil, _), do: nil
+  defp trim_ctx(list, max) when is_list(list) do
+    len = length(list)
+    if len <= max, do: list, else: Enum.drop(list, len - max)
   end
 
 end

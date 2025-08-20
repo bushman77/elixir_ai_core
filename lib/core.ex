@@ -3,12 +3,17 @@ defmodule Core do
 
   require Logger
   import Nx.Defn
+
   alias Axon
+  alias Brain
+  alias BrainCell
 
   alias Core.{
     Tokenizer,
     IntentClassifier,
     IntentResolver,
+    IntentPOSProfile,
+    POSDisambiguator,
     POSEngine,
     ResponsePlanner,
     SemanticInput,
@@ -16,8 +21,9 @@ defmodule Core do
     DB
   }
 
-  alias Brain
-  alias BrainCell
+  alias FRP.Features
+  alias MoodCore
+
   # alias LexiconEnricher   # ← not needed in this module anymore (Brain handles enrichment)
   # alias MoodCore          # keep if used below
 
@@ -65,6 +71,16 @@ end
 def resolve_input(input) when is_binary(input) do
   input
   |> Tokenizer.tokenize()
+  |> SemanticInput.sanitize()
+  |> then(fn sem ->
+    # 1) warm/start single-word cells (your Brain.get_or_start/1 already skips multiword/short/functional)
+    Enum.each(sem.token_structs, fn t -> Brain.get_or_start(t.phrase) end)
+
+    # 2) register attention (this also logs activations via your handle_call/3)
+    Brain.attention(sem.token_structs)
+    sem
+  end)
+  # (optional) keep if it does other work; otherwise you can delete it
   |> Core.activate_tokens()
   |> POSEngine.tag()
   |> then(fn sem ->
@@ -73,6 +89,9 @@ def resolve_input(input) when is_binary(input) do
   end)
   |> IntentClassifier.classify_tokens()
   |> IntentResolver.resolve_intent()
+  |> FRP.Features.attach_features()
+  |> IntentResolver.refine_with_pos_profiles()
+  |> Brain.prune_by_intent_pos()
   |> MoodCore.attach_mood()
   |> ResponsePlanner.analyze()
   |> then(&{:ok, &1})

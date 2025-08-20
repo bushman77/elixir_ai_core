@@ -8,6 +8,65 @@ defmodule Core.POS do
   alias BrainCell
 
   @multiword_cutoff 4
+  # Canonical tag set used everywhere (must match FRP.Features @pos_tags order)
+  @canonical [:noun, :verb, :adj, :adv, :pron, :det, :aux, :adp, :conj, :num, :part, :intj, :punct]
+
+  @doc "Return the canonical tag list."
+  def canonical_tags, do: @canonical
+
+  @doc """
+  Normalize any POS label (atom/string) to the canonical set above.
+  Unknowns map to :punct as a safe bucket.
+  """
+  def normalize(tag) when is_atom(tag) do
+    case tag do
+      # already canonical
+      t when t in @canonical -> t
+
+      # common long names
+      :adjective    -> :adj
+      :adverb       -> :adv
+      :interjection -> :intj
+      :preposition  -> :adp
+      :postposition -> :adp
+      :determiner   -> :det
+      :conjunction  -> :conj
+      :numeral      -> :num
+      :particle     -> :part
+      :punctuation  -> :punct
+      :auxiliary    -> :aux
+      :adposition   -> :adp
+
+      # UD / other variants
+      :propn        -> :noun
+      :proper_noun  -> :noun
+      :cconj        -> :conj
+      :sconj        -> :conj
+      :sym          -> :punct
+      :x            -> :part
+
+      # wh- categories (map sensibly)
+      :wh           -> :pron
+      :wh_pron      -> :pron
+      :wh_det       -> :det
+      :wh_adv       -> :adv
+
+      # fallback: try via string path
+      other -> other |> to_string() |> normalize()
+    end
+  end
+
+  def normalize(tag) when is_binary(tag) do
+    tag
+    |> String.downcase()
+    |> String.replace(~r/[^a-z_]/u, "")
+    |> String.to_atom()
+    |> normalize()
+  rescue
+    _ -> :punct
+  end
+
+  def normalize(_), do: :punct
 
   @doc """
   Enriches token structs with POS data from Brain.
@@ -31,24 +90,26 @@ defmodule Core.POS do
   Normalizes all POS tags to lowercase atoms.
   """
   def normalize_all_pos(pos_list) do
-    pos_list
-    |> Enum.map(&normalize_pos/1)
+pos_list
+    |> Enum.map(&normalize/1)
     |> Enum.uniq()
+    |> case do
+      [] -> [:punct]
+      xs -> xs
+    end
   end
-
+  
+  def normalize_pos(pos), do: normalize(pos)
   def normalize_pos(pos) when is_binary(pos) and pos != "" do
     pos |> String.downcase() |> String.to_atom()
   end
   def normalize_pos(pos) when is_atom(pos), do: pos
   def normalize_pos(_), do: :unknown
 
-  @doc """
-  Picks the most important POS if there are multiple.
-  """
+  @doc "Picks the most important POS if there are multiple."
   def pick_primary_pos(pos_list) do
-    priority = [:interjection, :verb, :noun, :adjective, :adverb, :preposition, :conjunction]
-
-    Enum.find(priority, fn p -> p in pos_list end) || hd(pos_list)
+    priority = [:intj, :verb, :noun, :adj, :adv, :adp, :conj, :det, :pron, :num, :part, :aux, :punct]
+    Enum.find(priority, &(&1 in pos_list)) || List.first(pos_list) || :punct
   end
 
   @doc """

@@ -143,6 +143,21 @@ end
     {:noreply, updated}
   end
 
+
+  # Gently damp a cell's activation. We prefer modulated_activation so it's non-destructive.
+def handle_cast({:attenuate, factor}, %BrainCell{} = state)
+    when is_number(factor) and factor >= 0.0 and factor <= 1.0 do
+  base =
+    cond do
+      is_number(state.modulated_activation) -> state.modulated_activation
+      is_number(state.activation)           -> state.activation
+      true                                  -> 0.0
+    end
+
+  new_mod = clamp01(base * factor)
+  {:noreply, %{state | modulated_activation: new_mod}}
+end
+
   # --------------------
   # Helpers
   # --------------------
@@ -154,5 +169,14 @@ end
   defp clamp(value) when value < 0.0, do: 0.0
   defp clamp(value) when value > 1.0, do: 1.0
   defp clamp(value), do: value
+
+  defp clamp01(x) when is_number(x) do
+  cond do
+    x < 0.0 -> 0.0
+    x > 1.0 -> 1.0
+    true    -> x
+  end
+end
+
 end
 

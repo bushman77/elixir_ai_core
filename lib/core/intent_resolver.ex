@@ -4,8 +4,11 @@ defmodule Core.IntentResolver do
   Matrix is only used to upgrade low-confidence results.
   """
 
-  alias Core.{IntentMatrix, SemanticInput, Profanity, IntentPosProfile}
+  alias Core.{IntentMatrix, SemanticInput, Profanity}#, IntentPosProfile}
   alias MoodCore
+  alias FRP.Features, as: Features
+alias Core.IntentPOSProfile, as: POSIntentProfile
+alias FRP.Features, as: Features
 
   @fallback_threshold Application.compile_env(:elixir_ai_core, :fallback_threshold, 0.55)
   @default_confidence 0.0
@@ -127,6 +130,53 @@ defp maybe_refine_with_pos_profiles(%SemanticInput{pos_list: pos_list} = sem) do
   end
 
   defp maybe_reinforce_positive(sem), do: sem
+
+@pos_boost 0.20
+@min_conf  0.35
+
+# Pipe-friendly: takes a SemanticInput, returns a refined SemanticInput
+def refine_with_pos_profiles(%{pos_list: pos_list} = sem) when is_list(pos_list) do
+  # If no POS info, no-op
+  if Enum.all?(pos_list, fn x -> x in [nil, []] end) do
+    sem
+  else
+    # Use the same histogram/order as FRP.Features to avoid drift
+    pos_hist = Features.pos_hist(pos_list)
+
+    intents = POSIntentProfile.intents()
+    {best_intent, best_sim} =
+      intents
+      |> Enum.map(&{&1, POSIntentProfile.score(pos_hist, &1)})
+      |> Enum.max_by(fn {_i, s} -> s end, fn -> {:unknown, 0.0} end)
+
+    current = normalize_intent(sem.intent)
+
+    sem2 =
+      cond do
+        (current in [nil, :unknown]) and best_sim > 0.5 ->
+          %{sem | intent: best_intent, source: :pos_refine, confidence: max(best_sim, sem.confidence || 0.0)}
+
+        (sem.confidence || 0.0) < @min_conf ->
+          blended = min(1.0, (sem.confidence || 0.0) * (1.0 - @pos_boost) + best_sim * @pos_boost)
+          %{sem | intent: best_intent, source: :pos_refine, confidence: blended}
+
+        true ->
+          nudged = min(1.0, (sem.confidence || 0.0) + @pos_boost * best_sim * 0.5)
+          %{sem | confidence: nudged, intent: current}
+      end
+
+    # Online update the prototype (EMA)
+    POSIntentProfile.observe(sem2.intent, pos_hist)
+    sem2
+  end
+end
+
+def refine_with_pos_profiles(sem), do: sem
+
+defp normalize_intent(:greet), do: :greeting
+defp normalize_intent(x) when is_atom(x), do: x
+defp normalize_intent(_), do: :unknown
+
 
   # ---------- helpers ----------
 
