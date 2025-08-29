@@ -17,10 +17,19 @@ A neuro-symbolic AI framework in **Elixir** that blends classic NLP (tokenizatio
 
 ## 🔭 System overview
 
-```mermaid
+
 flowchart TD
-    A[User Input] --> B[Core.Tokenizer]\n    B --> C[Core.POS → POSDisambiguator → ViterbiLite]\n    C --> D[IntentClassifier / IntentMatrix / IntentModel]\n    D --> E[IntentResolver]\n    E --> F[SemanticInput]\n    F --> G[Brain & BrainCell Supervisor]\n    G --> H[MoodCore • EmotionModulator • SubstanceEffect]\n    H --> I[ResponsePlanner]\n    I --> J[PhraseGenerator → BrainOutput]\n    J --> K[Console • local_llm_client • openai_client]
-    
+    A[User Input] --> B[Core.Tokenizer]
+    B --> C[Core.POS → POSDisambiguator → ViterbiLite]
+    C --> D[IntentClassifier / IntentMatrix / IntentModel]
+    D --> E[IntentResolver]
+    E --> F[SemanticInput]
+    F --> G[Brain & BrainCell Supervisor]
+    G --> H[MoodCore • EmotionModulator • SubstanceEffect]
+    H --> I[ResponsePlanner]
+    I --> J[PhraseGenerator → BrainOutput]
+    J --> K[Console • local_llm_client • openai_client]
+
     subgraph Knowledge & Memory
       L[MemoryCore] --- M[KnowledgeDistiller]
       N[Lexicon • Vocab • Profanity • MultiwordMatcher]
@@ -29,7 +38,7 @@ flowchart TD
     F -. context .-> L
     M -. enrich .-> N
     N -. expands .-> B
-```
+
 
 **Data Flow (high-level):**
 
