@@ -1,4 +1,8 @@
 # elixir\_ai\_core
+## Project Status
+Actively evolving neuro-symbolic Elixir AI: OTP/GenServers + Postgres BrainCells + Axon/Nx.
+Current focus: intent fusion, phrase generation, mood-modulated responses.
+See: CHANGELOG 0.0.1 “Spark” for what’s shipped and what’s next.
 
 A neuro-symbolic AI framework in **Elixir** that blends classic NLP (tokenization, POS tagging, intent rules), lightweight ML, and process-based “brain cell” actors. The system models cognition as flows of tokens → semantics → activated brain cells → mood-modulated response generation.
 
