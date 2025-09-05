@@ -1,43 +1,63 @@
 defmodule Core.MultiwordPOS do
   @moduledoc """
-  Minimal multiword-expression (MWE) lexicon for fast POS hints.
+  Minimal multiword/salient-phrase lexicon for POS hints used by the tokenizer
+  and a few unit tests.
 
-  * `lookup/1` returns a POS tag atom or `nil`.
-  * `phrases/0` exposes the exact-phrase keys (normalized).
-  * Case/space are normalized; straight/curly apostrophes are unified.
-  * Includes:
-    - greetings: "good morning/afternoon/evening", "thank you", "thanks a lot"
-    - WH starters (exact): "what time", "how much"
-    - Command-ish: "please help", "help me", "show me", "tell me"
-  * Prefix WH safety: matches start-of-string with **word boundary** (e.g.
-    `"where is the station"` -> `:wh`, but `"where isthmus ..."` -> `nil`).
+  * `lookup/1` → returns a POS tag atom or `nil`.
+  * `phrases/0` → returns the exact-phrase keys (normalized).
+  * Normalizes case/whitespace, unifies curly/straight apostrophes, and expands a few common WH contractions.
+  * Supports:
+    - greetings (exact & safe prefix)
+    - WH starters (exact & safe prefix)
+    - command-ish phrases (exact & safe prefix)
+    - courtesy combo: "please and thank you" → :particle
   """
 
-  @type pos_tag :: :interjection | :wh | :verb
+  @type pos_tag :: :interjection | :wh | :verb | :particle
 
-  # ---- exact phrase table (all lowercased, single-spaced) ----
+  # ---------- exact phrases (lowercased, single-spaced) ----------
   @phrase_map %{
-    # greetings
+    # single-word greetings (tests expect these here, not only in POSEngine)
+    "hello" => :interjection,
+    "hi" => :interjection,
+    "hey" => :interjection,
+    "yo" => :interjection,
+
+    # multiword greetings/courtesy
     "good morning" => :interjection,
     "good afternoon" => :interjection,
     "good evening" => :interjection,
     "thank you" => :interjection,
     "thanks a lot" => :interjection,
     "thanks so much" => :interjection,
+    "please and thank you" => :particle,
 
     # WH exact bigrams
     "what time" => :wh,
     "how much" => :wh,
+    "how many" => :wh,
+    # some tests treat these two as exact as well
+    "where is" => :wh,
+    "what is" => :wh,
 
-    # command-ish phrases
+    # command-ish exacts
     "please help" => :verb,
     "help me" => :verb,
     "show me" => :verb,
     "tell me" => :verb
   }
 
-  # ---- prefix rules (word-boundary) ----
-  # We keep these short and safe; they only fire at the beginning of the string.
+  # ---------- safe prefixes (beginning-of-string + word boundary) ----------
+  @greet_prefixes [
+    "hello",
+    "hi",
+    "hey",
+    "yo",
+    "good morning",
+    "good afternoon",
+    "good evening"
+  ]
+
   @wh_prefixes [
     "where is",
     "what is",
@@ -49,6 +69,13 @@ defmodule Core.MultiwordPOS do
     "what time"
   ]
 
+  @command_prefixes [
+    "please help",
+    "help me",
+    "show me",
+    "tell me"
+  ]
+
   @doc "Returns the list of exact phrases recognized (normalized)."
   @spec phrases() :: [String.t()]
   def phrases, do: Map.keys(@phrase_map)
@@ -56,13 +83,15 @@ defmodule Core.MultiwordPOS do
   @doc """
   Lookup a phrase → POS tag.
 
-  1) exact match (normalized)
-  2) WH prefix with word-boundary (beginning only)
-  3) fallback: `nil`
+  Order:
+    1) exact match
+    2) greeting prefix
+    3) command-ish prefix
+    4) WH prefix
+    5) nil
   """
   @spec lookup(String.t()) :: pos_tag | nil
   def lookup(nil), do: nil
-
   def lookup(phrase) when is_binary(phrase) do
     s = normalize(phrase)
 
@@ -73,7 +102,13 @@ defmodule Core.MultiwordPOS do
       pos = Map.get(@phrase_map, s) ->
         pos
 
-      wh_prefix?(s) ->
+      has_prefix?(s, @greet_prefixes) ->
+        :interjection
+
+      has_prefix?(s, @command_prefixes) ->
+        :verb
+
+      has_prefix?(s, @wh_prefixes) ->
         :wh
 
       true ->
@@ -81,13 +116,11 @@ defmodule Core.MultiwordPOS do
     end
   end
 
-  # ---- helpers ----
+  # ---------- helpers ----------
 
-  defp wh_prefix?(s) do
-    Enum.any?(@wh_prefixes, fn pfx ->
-      # enforce word boundary after the prefix to avoid "isthmus" false hits
-      # ^pfx\b
-      # Build a safe regex per prefix.
+  defp has_prefix?(s, list) do
+    Enum.any?(list, fn pfx ->
+      # enforce ^pfx\b to avoid e.g. "where isthmus"
       {:ok, re} = Regex.compile("^" <> Regex.escape(pfx) <> "\\b")
       Regex.match?(re, s)
     end)
@@ -102,10 +135,9 @@ defmodule Core.MultiwordPOS do
     |> String.trim()
   end
 
-  # unify straight/curly apostrophes
   defp unify_apostrophes(s), do: String.replace(s, ~r/[’]/u, "'")
 
-  # very small expansion set just to help WH patterns commonly seen in tests
+  # small WH contraction expansion (kept minimal for tests)
   defp expand_contractions(s) do
     s
     |> String.replace(~r/\bwhat's\b/, "what is")
