@@ -4,7 +4,7 @@ defmodule Core.IntentClassifier do
   with top-2 margin confidence and keyword extraction.
   Includes small post-classification overrides for:
     * deny:  "no" / "nope" / "nah"
-    * greet: sentences starting with "thank you"
+    * greeting: sentences starting with "thank you"
   """
   alias Core.POS
 
@@ -121,7 +121,7 @@ defmodule Core.IntentClassifier do
   def classify(%{token_structs: _} = struct), do: classify_tokens(struct)
   def classify(other), do: other
 
-  # ---------- scoring helpers ----------
+  # ----- scoring helpers -----
 
   defp any_pattern_match?(patterns, combos),
     do: Enum.any?(patterns, &(&1 in combos))
@@ -171,7 +171,9 @@ defmodule Core.IntentClassifier do
         not_question = not Enum.any?(token_structs, &Enum.member?(&1.pos, :wh))
         next_blocker =
           Enum.any?(rest, fn t -> Enum.any?(t.pos, &(&1 in [:modal, :auxiliary])) end)
+
         if verb_start and not_question and not next_blocker, do: 0.45, else: 0.0
+
       _ -> 0.0
     end
   end
@@ -188,12 +190,13 @@ defmodule Core.IntentClassifier do
     sv_like =
       contains_sequence?(token_structs, [:noun, :verb]) or
       contains_sequence?(token_structs, [:pronoun, :verb])
+
     if sv_like, do: 0.25, else: 0.0
   end
 
   defp bonus_for_intent(_other, _toks, _texts), do: 0.0
 
-  # ---------- decision & confidence ----------
+  # ----- decision & confidence -----
 
   defp decide([], _toks, _texts, _pos), do: {:unknown, 0.0}
 
@@ -205,7 +208,9 @@ defmodule Core.IntentClassifier do
         [{_, s} | _] -> s
         _ -> 0.0
       end
+
       margin = max(top - second, 0.0)
+
       conf =
         cond do
           margin >= 1.0  -> 1.0
@@ -214,15 +219,18 @@ defmodule Core.IntentClassifier do
           margin >= 0.2  -> 0.6
           true           -> 0.55
         end
+
       {intent, conf}
     end
   end
 
   defp rescue_decide(_toks, texts, pos_lists) do
     insult = Enum.any?(texts, &(&1 in @insult_lex))
+
     questionish =
       Enum.any?(List.flatten(pos_lists), &(&1 == :wh)) or
       Enum.any?(texts, &String.ends_with?(&1, "?"))
+
     cond do
       insult      -> {:insult, 0.9}
       questionish -> {:question, 0.65}
@@ -230,7 +238,7 @@ defmodule Core.IntentClassifier do
     end
   end
 
-  # ---------- keyword extraction ----------
+  # ----- keyword extraction -----
 
   defp extract_keyword(:greet, token_structs, texts) do
     Enum.find(texts, &(&1 in ~w(hi hello hey yo sup))) ||
@@ -261,31 +269,23 @@ defmodule Core.IntentClassifier do
 
   defp extract_keyword(_other, _toks, _texts), do: nil
 
-  # ---------- post-classification overrides ----------
+  # ----- post-classification overrides -----
 
-  defp apply_overrides(%{sentence: _} = sem, toks, texts) do
+  defp apply_overrides(%{sentence: _} = sem, toks, _texts) do
     s =
       (Map.get(sem, :original_sentence) || Map.get(sem, :sentence) || "")
       |> to_string()
       |> String.downcase()
       |> String.trim()
 
-    thank_you_tokens? =
-      case texts do
-        ["thank", "you" | _] -> true
-        ["thanks_mwe" | _]   -> true
-        _                    -> false
-      end
-
     cond do
-      # Force deny for clear negatives (string or token-start)
-      s in @deny_lex or (texts != [] and hd(texts) in @deny_lex) ->
+      s in @deny_lex ->
         %{sem | intent: :deny, keyword: nil,
                 confidence: max(sem.confidence || 0.0, 0.85),
                 source: :classifier}
 
-      # Treat “thank you …” as greeting for smoke test + UX
-      String.starts_with?(s, "thank you") or thank_you_tokens? or has_mwe?(toks, "thanks_mwe") ->
+      # Gate the greeting override: only apply if the tokenizer did NOT produce the MWE.
+      String.starts_with?(s, "thank you") and not has_mwe?(toks, "thanks_mwe") ->
         %{sem | intent: :greet, keyword: "thank you",
                 confidence: max(sem.confidence || 0.0, 0.6),
                 source: :classifier}
@@ -295,7 +295,7 @@ defmodule Core.IntentClassifier do
     end
   end
 
-  # ---------- utilities ----------
+  # ----- utilities -----
 
   defp first_pos(tokens, pos_tag) do
     tokens

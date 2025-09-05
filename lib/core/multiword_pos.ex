@@ -1,123 +1,119 @@
 defmodule Core.MultiwordPOS do
   @moduledoc """
-  Multiword POS lookup + phrase inventory for the MultiwordMatcher.
+  Minimal multiword-expression (MWE) lexicon for fast POS hints.
 
-  - `lookup/1` returns a POS atom or nil.
-  - `phrases/0` returns normalized phrases that the matcher should index.
-
-  Covers:
-    * Greetings: hello/hi/hey/yo/greetings/howdy/sup (+ optional “there”).
-    * Greeting MWEs: “good morning/afternoon/evening”.
-    * Courtesy/thanks: "thank you", "thanks a lot", "please and thank you".
-    * WH: single words (what/when/where/who/why/how) and “what is”, “where is”,
-          “who is”, “what time”, “how much” (+ contraction expansion).
-    * Command-ish: “help”, “help me/with/out”, “please help”, “help please”.
-    * Word-boundary prefix (“where is …” won’t match “where isthmus …”).
+  * `lookup/1` returns a POS tag atom or `nil`.
+  * `phrases/0` exposes the exact-phrase keys (normalized).
+  * Case/space are normalized; straight/curly apostrophes are unified.
+  * Includes:
+    - greetings: "good morning/afternoon/evening", "thank you", "thanks a lot"
+    - WH starters (exact): "what time", "how much"
+    - Command-ish: "please help", "help me", "show me", "tell me"
+  * Prefix WH safety: matches start-of-string with **word boundary** (e.g.
+    `"where is the station"` -> `:wh`, but `"where isthmus ..."` -> `nil`).
   """
 
-  @greetings ~w(hello hi hey yo greetings howdy sup)
+  @type pos_tag :: :interjection | :wh | :verb
 
-  # phrase -> POS
-  @phrase_pos %{
-    # greetings (MWEs)
-    "good morning"         => :interjection,
-    "good afternoon"       => :interjection,
-    "good evening"         => :interjection,
+  # ---- exact phrase table (all lowercased, single-spaced) ----
+  @phrase_map %{
+    # greetings
+    "good morning" => :interjection,
+    "good afternoon" => :interjection,
+    "good evening" => :interjection,
+    "thank you" => :interjection,
+    "thanks a lot" => :interjection,
+    "thanks so much" => :interjection,
 
-    # thanks / courtesy
-    "thank you"            => :interjection,
-    "thanks a lot"         => :interjection,
-    "please and thank you" => :particle,
+    # WH exact bigrams
+    "what time" => :wh,
+    "how much" => :wh,
 
-    # WH phrases
-    "what is"              => :wh,
-    "where is"             => :wh,
-    "who is"               => :wh,
-    "what time"            => :wh,
-    "how much"             => :wh,
-
-    # command-ish
-    "help"                 => :verb,
-    "help me"              => :verb,
-    "help with"            => :verb,
-    "help out"             => :verb,
-    "please help"          => :verb,
-    "help please"          => :verb
+    # command-ish phrases
+    "please help" => :verb,
+    "help me" => :verb,
+    "show me" => :verb,
+    "tell me" => :verb
   }
 
-  @doc "Return a POS atom or nil for the given phrase/sentence."
-  @spec lookup(String.t()) :: atom() | nil
+  # ---- prefix rules (word-boundary) ----
+  # We keep these short and safe; they only fire at the beginning of the string.
+  @wh_prefixes [
+    "where is",
+    "what is",
+    "who is",
+    "when is",
+    "why is",
+    "how much",
+    "how many",
+    "what time"
+  ]
+
+  @doc "Returns the list of exact phrases recognized (normalized)."
+  @spec phrases() :: [String.t()]
+  def phrases, do: Map.keys(@phrase_map)
+
+  @doc """
+  Lookup a phrase → POS tag.
+
+  1) exact match (normalized)
+  2) WH prefix with word-boundary (beginning only)
+  3) fallback: `nil`
+  """
+  @spec lookup(String.t()) :: pos_tag | nil
+  def lookup(nil), do: nil
+
   def lookup(phrase) when is_binary(phrase) do
-    norm =
-      phrase
-      |> normalize()
-      |> expand_contractions()
-      |> strip_trailing_punct()
-      |> squish()
+    s = normalize(phrase)
 
     cond do
-      # single-word greeting or greeting + 'there'
-      Regex.match?(~r/^(hello|hi|hey|yo|greetings|howdy|sup)(\s+there)?$/u, norm) ->
-        :interjection
+      s == "" ->
+        nil
 
-      # single-word WH or exact short WH starters
-      Regex.match?(~r/^(what|when|where|who|why|how)(\s+(is|are|time|much))?$/u, norm) ->
+      pos = Map.get(@phrase_map, s) ->
+        pos
+
+      wh_prefix?(s) ->
         :wh
 
-      # flexible command-ish “help …”
-      Regex.match?(~r/^(please\s+)?(help|assist|support)(\s+(me|with|out|please))?$/u, norm) ->
-        :verb
-
-      # exact phrase table
-      Map.has_key?(@phrase_pos, norm) ->
-        Map.fetch!(@phrase_pos, norm)
-
       true ->
-        # prefix phrase with word boundary, e.g., "where is the station"
-        # (requires a space after the phrase; avoids "where isthmus …")
-        prefixed_phrase_pos(norm)
+        nil
     end
   end
 
-  def lookup(_), do: nil
+  # ---- helpers ----
 
-  @doc "List of normalized phrases for the matcher to index."
-  @spec phrases() :: [String.t()]
-  def phrases, do: Map.keys(@phrase_pos)
-
-  # ---------- helpers ----------
-
-  defp prefixed_phrase_pos(norm) do
-    Map.keys(@phrase_pos)
-    |> Enum.sort_by(&String.length/1, :desc)
-    |> Enum.find_value(fn p ->
-      if String.starts_with?(norm, p <> " ") do
-        Map.fetch!(@phrase_pos, p)
-      else
-        nil
-      end
+  defp wh_prefix?(s) do
+    Enum.any?(@wh_prefixes, fn pfx ->
+      # enforce word boundary after the prefix to avoid "isthmus" false hits
+      # ^pfx\b
+      # Build a safe regex per prefix.
+      {:ok, re} = Regex.compile("^" <> Regex.escape(pfx) <> "\\b")
+      Regex.match?(re, s)
     end)
   end
 
-  defp normalize(s) when is_binary(s), do: String.downcase(String.trim(s))
-  defp normalize(_), do: ""
+  defp normalize(s) do
+    s
+    |> String.downcase()
+    |> unify_apostrophes()
+    |> expand_contractions()
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+  end
 
-  defp squish(s), do: String.replace(s, ~r/[[:space:]]+/, " ")
+  # unify straight/curly apostrophes
+  defp unify_apostrophes(s), do: String.replace(s, ~r/[’]/u, "'")
 
-  # tolerate trailing punctuation like "hi!!!", "help?", "thanks a lot."
-  defp strip_trailing_punct(s), do: String.replace(s, ~r/[\s]*[!?,;:…\.]+$/u, "")
-
-  # expand curly/straight apostrophes in common WH contractions
+  # very small expansion set just to help WH patterns commonly seen in tests
   defp expand_contractions(s) do
     s
-    |> String.replace("what’s",  "what is")
-    |> String.replace("what's",  "what is")
-    |> String.replace("where’s", "where is")
-    |> String.replace("where's","where is")
-    |> String.replace("who’s",   "who is")
-    |> String.replace("who's",   "who is")
-    |> String.replace("how’s",   "how is")
-    |> String.replace("how's",   "how is")
+    |> String.replace(~r/\bwhat's\b/, "what is")
+    |> String.replace(~r/\bwho's\b/, "who is")
+    |> String.replace(~r/\bwhere's\b/, "where is")
+    |> String.replace(~r/\bwhen's\b/, "when is")
+    |> String.replace(~r/\bwhy's\b/, "why is")
+    |> String.replace(~r/\bhow's\b/, "how is")
   end
 end
 
