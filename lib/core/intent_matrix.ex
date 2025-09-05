@@ -38,6 +38,18 @@ defmodule Core.IntentMatrix do
   defp contains_any?(tokens, words),
     do: Enum.any?(tokens, &(down(&1) in words))
 
+  # new: regex match anywhere (tolerates punctuation and morphology)
+  defp contains_regex?(tokens, regex),
+    do: Enum.any?(tokens, fn t -> Regex.match?(regex, down(t)) end)
+
+  # new: simple bigram detector for phrases like "my bad", "excuse me"
+  defp has_bigram?(tokens, [w1, w2]) do
+    toks = Enum.map(tokens, &down/1)
+    toks
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.any?(fn [a, b] -> a == w1 and b == w2 end)
+  end
+
   defp conf_from_margin(top, second) do
     margin = max(top - second, 0.0)
 
@@ -57,15 +69,35 @@ defmodule Core.IntentMatrix do
       {:greeting, 2.0, fn toks ->
         starts_with_interjection?(toks) or has_mwe?(toks, "greeting_mwe")
       end},
+
       {:thanks, 1.6, fn toks ->
         has_interjection?(toks, ~w(thanks thank)) or has_mwe?(toks, "thanks_mwe")
       end},
+
+      # NEW: apology intent (robust to spelling + MWEs)
+      {:apology, 1.7, fn toks ->
+        # common interjection and MWEs
+        has_interjection?(toks, ~w(sorry)) or
+        has_mwe?(toks, "sorry_mwe") or
+        has_mwe?(toks, "apology_mwe") or
+        has_mwe?(toks, "my_bad_mwe") or
+        has_bigram?(toks, ["my", "bad"]) or
+        has_bigram?(toks, ["my", "apologies"]) or
+        has_bigram?(toks, ["excuse", "me"]) or
+        has_bigram?(toks, ["pardon", "me"]) or
+        # morphology: apologize/apologise (+ tenses), apology/apologies, apologetic
+        contains_regex?(toks, ~r/\bapolog(y|ies|etic|etically)\b/) or
+        contains_regex?(toks, ~r/\bapologi[sz](e|ed|es|ing)\b/)
+      end},
+
       {:insult, 2.0, fn toks ->
         contains_any?(toks, ~w(fuck idiot stupid))
       end},
+
       {:question_time, 1.8, fn toks ->
         has_mwe?(toks, "what_time_mwe") or wh_about_noun?(toks, "time")
       end},
+
       {:price_query, 1.6, fn toks ->
         has_mwe?(toks, "how_much_mwe") or wh_about_noun?(toks, "price")
       end}

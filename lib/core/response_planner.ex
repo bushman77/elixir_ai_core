@@ -8,6 +8,7 @@ defmodule Core.ResponsePlanner do
   alias ML.GrumpModel
   alias BrainCell
   alias PhraseGenerator
+  alias MoodCore
 
   @high_confidence 0.6
   @low_confidence  0.3
@@ -17,9 +18,20 @@ defmodule Core.ResponsePlanner do
 
   # keep this light; avoid anything sensitive
   @mild_insult_regex ~r/\b(heck|darn|poo|poopy|noob|clown|loser|dummy|idiot|stupid)\b/i
-  @apology_regex      ~r/\b(sorry|my\s+bad|apolog(?:y|ize|ising|izing))\b/i
-  
-@grump_blocklist ~w(race religion gender sexuality slur slurs hate violent kill die nazi)
+
+  # Strong, morphology-tolerant apology matcher
+  @apology_regex ~r/
+    \b(?:sorry)\b
+    | \bmy\s+(?:bad|apolog(?:y|ies))\b
+    | \b(?:excuse|pardon)[\s,.\-]*me\b
+    | \bapolog(?:y|ies|etic|etically)\b
+    | \bapologi[sz](?:e|ed|es|ing)\b
+  /ix
+
+  # Trust IntentMatrix when it emits :apology above this confidence
+  @apology_conf 0.55
+
+  @grump_blocklist ~w(race religion gender sexuality slur slurs hate violent kill die nazi)
 
   @greeting_msgs [
     "Hey there! 👋 How can I assist you today?",
@@ -51,7 +63,7 @@ defmodule Core.ResponsePlanner do
     "Oh, it’s you. What now?"
   ]
 
-  @clarify_msg "Hmm… I didn’t quite understand that."
+  @clarify_msg  "Hmm… I didn’t quite understand that."
   @farewell_msg "Goodbye for now. Take care!"
 
   # Mood-aware boundaries for insults
@@ -72,22 +84,24 @@ defmodule Core.ResponsePlanner do
   ]
 
   @doc "Attach a `response` and a tiny trace to the SemanticInput based on its fields."
-@spec analyze(SemanticInput.t()) :: SemanticInput.t()
-def analyze(%SemanticInput{} = sem) do
-  sem = %{sem | intent: normalize_intent(sem.intent)}
+  @spec analyze(SemanticInput.t()) :: SemanticInput.t()
+  def analyze(%SemanticInput{} = sem) do
+    sem = %{sem | intent: normalize_intent(sem.intent)}
 
-  response = plan(sem)
-  dbg = Process.get(:planner_dbg) || %{}   # ← pull debug from plan/1
+    response = plan(sem)
+    dbg = Process.get(:planner_dbg) || %{}   # ← pull debug from plan/1
 
-  trace = %{
-    intent: sem.intent,
-    kw: sem.keyword,
-    conf: sem.confidence,
-    mood: sem.mood
-  } |> Map.merge(dbg)
+    trace =
+      %{
+        intent: sem.intent,
+        kw: sem.keyword,
+        conf: sem.confidence,
+        mood: sem.mood
+      }
+      |> Map.merge(dbg)
 
-  %{sem | response: response, planned_response: response, activation_summary: trace}
-end
+    %{sem | response: response, planned_response: response, activation_summary: trace}
+  end
 
   # ---------- Intent normalization ----------
   defp normalize_intent(i) do
@@ -106,44 +120,117 @@ end
     end
   end
 
-  # ---------- Grump override → Core fallback ----------
+  # ---------- Act normalization for procedure recipes ----------
+  defp normalize_act(act0) do
+    act0
+    |> String.downcase()
+    |> String.replace(~r/\b(my|our|your)\b/, "")            # drop pronouns
+    |> String.replace(~r/\b(to|do|does|did|can|could|should|would|will)\b/, "") # drop aux/fillers
+    |> String.replace(~r/[^\w\s]/, " ")                    # drop punctuation to spaces (safety)
+    |> String.replace(~r/\s+/, " ")                        # squish multiple spaces → one
+    |> String.trim()
+  end
 
-  # Top-level planner:
-# Order: apology → grump override → core flow
-defp plan(%SemanticInput{sentence: s, mood: mood} = sem) when is_binary(s) do
-  # default debug
-  dbg = %{path: :core, grump_label: nil, grump_conf: nil, mild_hit: false, safe: true}
-  Process.put(:planner_dbg, dbg)
-
-  # Apology short-circuit
-  if Regex.match?(@apology_regex, s) do
-    Process.put(:planner_dbg, Map.merge(dbg, %{path: :apology}))
-    return_apology_reply(mood)
-  else
-    {label, conf} = ML.GrumpModel.predict(s)
-    safe     = safe_for_grump?(s)
-    mild_hit = Regex.match?(@mild_insult_regex, s)
-
-    Process.put(:planner_dbg,
-      %{path: :grump_check, grump_label: label, grump_conf: conf, mild_hit: mild_hit, safe: safe})
-
-    if safe and ((label == "insult" and conf >= @grump_threshold) or mild_hit) do
-      Process.put(:planner_dbg, Map.merge(Process.get(:planner_dbg), %{path: :grump_reply}))
-      case mood do
-        :grumpy   -> Enum.random(@snarky_boundaries)
-        :negative -> Enum.random(@firm_boundaries)
-        _         -> Enum.random(@gentle_boundaries)
-      end
-    else
-      Process.put(:planner_dbg, Map.merge(Process.get(:planner_dbg), %{path: :core}))
-      plan_core(sem)
+  defp key_for_recipe(act0) do
+    case normalize_act(act0) do
+      "brush teeth" -> "brush teeth"
+      # Add more aliases as you grow recipes:
+      # "wash hands" -> "wash hands"
+      # "tie shoes"  -> "tie shoes"
+      other -> other
     end
   end
-end
 
-defp plan(sem), do: plan_core(sem)  # no sentence
+  # ---------- Helpers: apology & grump gating ----------
 
+  # Prefer IntentMatrix signal when present; otherwise regex fallback
+  defp apology?(%SemanticInput{intent: :apology, confidence: c}) when is_number(c),
+    do: c >= @apology_conf
+  defp apology?(%SemanticInput{sentence: s}) when is_binary(s),
+    do: Regex.match?(@apology_regex, s)
+  defp apology?(_), do: false
+
+  # Treat these as benign; don't let a noisy model hijack them.
+  defp benign_intent?(i),
+    do: i in [:procedure_request, :question, :inform, :thank, :greeting, :farewell, :confirm, :deny, :define, :why, :apology]
+
+  defp should_use_grump?(intent, safe, label, conf, mild_hit) do
+    cond do
+      # Always allow boundaries if we see explicit insult tokens.
+      mild_hit ->
+        safe
+
+      # For benign intents, ignore model-only "insult" predictions (reduce false positives).
+      benign_intent?(intent) ->
+        false
+
+      # Otherwise, require confident insult + safety.
+      true ->
+        safe and (label == "insult" and conf >= @grump_threshold)
+    end
+  end
+
+  # Top-level planner:
+  # Order: apology → (conditional) grump override → core flow
+  defp plan(%SemanticInput{sentence: s, mood: mood} = sem) when is_binary(s) do
+    # default debug
+    dbg = %{path: :core, grump_label: nil, grump_conf: nil, mild_hit: false, safe: true}
+    Process.put(:planner_dbg, dbg)
+
+    # Apology short-circuit (matrix or regex)
+    if apology?(sem) do
+      Process.put(:planner_dbg, Map.merge(dbg, %{path: :apology}))
+      return_apology_reply(mood)
+    else
+      {label, conf} = ML.GrumpModel.predict(s)
+      safe     = safe_for_grump?(s)
+      mild_hit = Regex.match?(@mild_insult_regex, s)
+
+      apply_grump? = should_use_grump?(sem.intent, safe, label, conf, mild_hit)
+
+      # Forgiveness window (skip grump replies for a short time after an apology)
+      now_ms = System.monotonic_time(:millisecond)
+      forgiven? = (Process.get(:forgive_until) || 0) > now_ms
+      apply_grump? = apply_grump? and not forgiven?
+
+      Process.put(:planner_dbg,
+        %{
+          path: (apply_grump? && :grump_reply) || :core,
+          grump_label: label,
+          grump_conf: conf,
+          mild_hit: mild_hit,
+          safe: safe,
+          benign_intent: benign_intent?(sem.intent),
+          forgiven?: forgiven?
+        }
+      )
+
+      if apply_grump? do
+        case mood do
+          :grumpy   -> Enum.random(@snarky_boundaries)
+          :negative -> Enum.random(@firm_boundaries)
+          _         -> Enum.random(@gentle_boundaries)
+        end
+      else
+        plan_core(sem)
+      end
+    end
+  end
+
+  defp plan(sem), do: plan_core(sem)  # no sentence
+
+  # After an apology, cool down mood and set a short forgiveness window
   defp return_apology_reply(mood) do
+    # Actively cool down mood (best-effort; ignore if MoodCore isn't available)
+    try do
+      MoodCore.apply(:positive, amount: 0.35, ttl: 30_000)
+    rescue
+      _ -> :ok
+    end
+
+    # 20s forgiveness: during this, skip grump/snark
+    Process.put(:forgive_until, System.monotonic_time(:millisecond) + 20_000)
+
     case mood do
       :grumpy   -> "We’re good. Let’s move on. 👍"
       :negative -> "Thanks for saying that. Let’s reset and keep going."
@@ -161,7 +248,10 @@ defp plan(sem), do: plan_core(sem)  # no sentence
     not Enum.any?(@grump_blocklist, &String.contains?(down, &1))
   end
 
-  # ---------- Original flow (moved to plan_core/*) ----------
+  # ---------- Core flow (plan_core/*) ----------
+
+  # 0) Explicit apology intent even without sentence (e.g., upstream routed)
+  defp plan_core(%SemanticInput{intent: :apology, mood: mood}), do: return_apology_reply(mood)
 
   # 1) If a BrainCell is attached, use that for context-rich replies
   defp plan_core(%SemanticInput{cell: %BrainCell{} = cell} = sem) do
@@ -169,16 +259,35 @@ defp plan(sem), do: plan_core(sem)  # no sentence
   end
 
   # 2) Explicit intents (before keyword fallback)
+
+  # procedure requests (“how to…”, “how do we…”) → numbered steps
+  defp plan_core(%SemanticInput{intent: :procedure_request} = si) do
+    act   = Map.get(si.pattern_roles || %{}, :act) || si.keyword || "the task"
+    steps = steps_for(act)
+    render_steps(act, steps)
+  end
+
   defp plan_core(%SemanticInput{intent: :greeting, mood: mood, confidence: conf}) do
-    case mood do
-      :grumpy ->
+    # Prefer friendly tone if we're inside forgiveness window
+    forgiven? = (Process.get(:forgive_until) || 0) > System.monotonic_time(:millisecond)
+
+    cond do
+      forgiven? ->
+        Enum.random(@greeting_neutral ++ @greeting_positive)
+
+      mood == :grumpy ->
         if conf >= @high_confidence and :rand.uniform() < 0.2,
           do: Enum.random(@greeting_calm),
           else: Enum.random(@greeting_grumpy)
 
-      :positive -> Enum.random(@greeting_positive)
-      :calm     -> Enum.random(@greeting_calm)
-      _         -> Enum.random(@greeting_neutral)
+      mood == :positive ->
+        Enum.random(@greeting_positive)
+
+      mood == :calm ->
+        Enum.random(@greeting_calm)
+
+      true ->
+        Enum.random(@greeting_neutral)
     end
   end
 
@@ -350,6 +459,42 @@ defp plan(sem), do: plan_core(sem)  # no sentence
 
   defp generic_keyword_fallback(intent, kw) do
     "I saw intent `#{intent}` and keyword `#{kw}`, but couldn't handle that combo yet."
+  end
+
+  # ---------- Minimal steps renderer (kept local to this file) ----------
+  defp steps_for(act0) do
+    case key_for_recipe(act0) do
+      "brush teeth" ->
+        [
+          "Grab a soft-bristled toothbrush and fluoride toothpaste.",
+          "Wet the bristles and apply a pea-sized amount of toothpaste.",
+          "Angle the brush ~45° to the gumline; use gentle, small circles.",
+          "Spend ~30s per quadrant (≈2 minutes total): outer, inner, chewing surfaces.",
+          "Gently brush the tongue and roof of the mouth.",
+          "Spit; avoid heavy rinsing so a thin fluoride film remains.",
+          "Rinse the brush and let it air-dry. Floss once per day."
+        ]
+
+      _other ->
+        [
+          "Gather what you need for #{act0}.",
+          "Prepare the space/tools; remove blockers.",
+          "Do the main action in small, controlled steps.",
+          "Check the result; repeat or adjust as needed.",
+          "Clean up and store tools for next time."
+        ]
+    end
+  end
+
+  defp render_steps(act, steps) do
+    header = "Here’s a simple way to #{String.replace_leading(String.trim(act), "to ", "")}:"
+    numbered =
+      steps
+      |> Enum.with_index(1)
+      |> Enum.map(fn {s, i} -> "#{i}. #{s}" end)
+      |> Enum.join("\n")
+
+    header <> "\n\n" <> numbered
   end
 end
 
