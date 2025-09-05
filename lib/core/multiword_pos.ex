@@ -24,11 +24,19 @@ defmodule Core.MultiwordPOS do
     "please and thank you" => :particle,
     "please"               => :particle,
 
+    # WH starters (single word) — tests expect these to be :wh
+    "what" => :wh,
+    "where" => :wh,
+    "who" => :wh,
+    "when" => :wh,
+    "why" => :wh,
+    "how" => :wh,
+
     # WH starters / common bigrams
-    "what is"              => :wh,   # <- add this
+    "what is"              => :wh,
     "what time"            => :wh,
-    "what's the time"      => :wh,   # straight apostrophe
-    "whats the time"       => :wh,   # apostrophe lost by external cleaners
+    "what's the time"      => :wh,  # straight apostrophe
+    "whats the time"       => :wh,  # apostrophe lost by external cleaners
     "where is"             => :wh,
     "who is"               => :wh,
     "when is"              => :wh,
@@ -45,7 +53,8 @@ defmodule Core.MultiwordPOS do
     "lookup"               => :verb,
     "find"                 => :verb,
     "open"                 => :verb,
-    "check"                => :verb
+    "check"                => :verb,
+    "search for"           => :verb
   }
 
   @phrase_list @phrases |> Map.keys() |> Enum.sort()  # deterministic for tests
@@ -78,8 +87,14 @@ defmodule Core.MultiwordPOS do
     s
     |> String.downcase()
     |> String.replace(~r/[’‘]/u, "'")   # curly -> straight
+    |> expand_wh_contractions()
     |> String.replace(~r/\s+/, " ")
     |> String.trim()
+  end
+
+  # Expand WH + 's so "Where's the station" -> "where is the station"
+  defp expand_wh_contractions(s) do
+    String.replace(s, ~r/\b(what|where|who|when|why|how)'s\b/, "\\1 is")
   end
 
   # Starts-with + next char must be a boundary (or end of string)
