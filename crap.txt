@@ -1,0 +1,5 @@
+SFT_PATH=/path/to/grumpy_sft_seed_1k.jsonl mix run scripts/train_base.exs
+
+SFT_PATH=/path/to/grumpy_sft_seed_1k.jsonl mix run scripts/finetune_mood_adapter.exs
+
+RERANK_PATH=/path/to/grumpy_reranker_5k.jsonl mix run scripts/train_reranker.exs

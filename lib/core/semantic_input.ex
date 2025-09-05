@@ -7,13 +7,16 @@ defmodule Core.SemanticInput do
   @type intent_t :: atom() | nil
   @type mood_t :: atom() | nil
   @type source_t :: :user | :system | :test | atom() | nil
-
   @type llm_ctx_t :: [integer] | nil
   @type llm_model_t :: String.t() | nil
   @type llm_system_t :: String.t() | nil
 
+  # NEW: orthogonal speech-act axis
+  @type speech_act_t :: :question | :statement | :command | :fragment | :exclamation | atom() | nil
+  @type question_kind_t :: :wh | :polar | :choice | :elliptical | :rhetorical | atom() | nil
+
   @type t :: %__MODULE__{
-          # NEW: preserve exact user text
+          # Preserve exact user text
           original_sentence: String.t() | nil,
           # Normalized/processed sentence used by the pipeline
           sentence: String.t() | nil,
@@ -46,26 +49,24 @@ defmodule Core.SemanticInput do
           response: String.t() | nil,
           planned_response: String.t() | nil,
 
-          # ── NEW: LLM session state ─────────────────────────────────────────────
-          # Raw token buffer from Ollama (or compatible server)
+          # NEW: speech-act annotations (form, not meaning)
+          speech_act: speech_act_t,
+          question_kind: question_kind_t,
+
+          # ── LLM session state ─────────────────────────────────────────────
           llm_ctx: llm_ctx_t,
-          # Which model produced/consumes that buffer (guards against mismatches)
           llm_model: llm_model_t,
-          # Optional: the active system/persona prompt used for this session
           llm_system: llm_system_t
         }
 
   defstruct [
-    # NEW
     :original_sentence,
-    # existing
     :sentence,
     :tokens,
     :token_structs,
     :cells,
     :pos_list,
     :intent,
-    # NEW (already in your version, reaffirmed)
     :gold_intent,
     :keyword,
     :confidence,
@@ -77,13 +78,16 @@ defmodule Core.SemanticInput do
     :cell,
     :response,
     :planned_response,
-    # ── NEW LLM fields (default nil keeps this fully backward-compatible) ──
+    # NEW
+    :speech_act,
+    :question_kind,
+    # LLM
     :llm_ctx,
     :llm_model,
     :llm_system
   ]
 
-# ✅ use %__MODULE__{} here (or %Core.SemanticInput{})
+  # Keep your existing sanitize
   def sanitize(%__MODULE__{token_structs: toks} = input) do
     pruned =
       toks
@@ -92,5 +96,9 @@ defmodule Core.SemanticInput do
 
     %{input | token_structs: pruned}
   end
+
+  # Convenience: set speech-act pair
+  def with_speech_act(%__MODULE__{} = si, {sa, kind}),
+    do: %{si | speech_act: sa, question_kind: kind}
 end
 
