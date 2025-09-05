@@ -150,6 +150,10 @@ defmodule Core.ResponsePlanner do
     do: Regex.match?(@apology_regex, s)
   defp apology?(_), do: false
 
+  # Are we inside the forgiveness window?
+  defp forgiven?(),
+    do: (Process.get(:forgive_until) || 0) > System.monotonic_time(:millisecond)
+
   # Treat these as benign; don't let a noisy model hijack them.
   defp benign_intent?(i),
     do: i in [:procedure_request, :question, :inform, :thank, :greeting, :farewell, :confirm, :deny, :define, :why, :apology]
@@ -182,16 +186,15 @@ defmodule Core.ResponsePlanner do
       Process.put(:planner_dbg, Map.merge(dbg, %{path: :apology}))
       return_apology_reply(mood)
     else
-      {label, conf} = ML.GrumpModel.predict(s)
+      {label, conf} = GrumpModel.predict(s)
       safe     = safe_for_grump?(s)
       mild_hit = Regex.match?(@mild_insult_regex, s)
 
       apply_grump? = should_use_grump?(sem.intent, safe, label, conf, mild_hit)
 
       # Forgiveness window (skip grump replies for a short time after an apology)
-      now_ms = System.monotonic_time(:millisecond)
-      forgiven? = (Process.get(:forgive_until) || 0) > now_ms
-      apply_grump? = apply_grump? and not forgiven?
+      forgiven = forgiven?()
+      apply_grump? = apply_grump? and not forgiven
 
       Process.put(:planner_dbg,
         %{
@@ -201,7 +204,7 @@ defmodule Core.ResponsePlanner do
           mild_hit: mild_hit,
           safe: safe,
           benign_intent: benign_intent?(sem.intent),
-          forgiven?: forgiven?
+          forgiven?: forgiven
         }
       )
 
@@ -269,35 +272,40 @@ defmodule Core.ResponsePlanner do
 
   defp plan_core(%SemanticInput{intent: :greeting, mood: mood, confidence: conf}) do
     # Prefer friendly tone if we're inside forgiveness window
-    forgiven? = (Process.get(:forgive_until) || 0) > System.monotonic_time(:millisecond)
+    if forgiven?() do
+      # After an apology → lean overtly friendly to reinforce the reset
+      Enum.random(@greeting_positive)
+    else
+      cond do
+        mood == :grumpy ->
+          if conf >= @high_confidence and :rand.uniform() < 0.2,
+            do: Enum.random(@greeting_calm),
+            else: Enum.random(@greeting_grumpy)
 
-    cond do
-      forgiven? ->
-        Enum.random(@greeting_neutral ++ @greeting_positive)
+        mood == :positive ->
+          Enum.random(@greeting_positive)
 
-      mood == :grumpy ->
-        if conf >= @high_confidence and :rand.uniform() < 0.2,
-          do: Enum.random(@greeting_calm),
-          else: Enum.random(@greeting_grumpy)
+        mood == :calm ->
+          Enum.random(@greeting_calm)
 
-      mood == :positive ->
-        Enum.random(@greeting_positive)
-
-      mood == :calm ->
-        Enum.random(@greeting_calm)
-
-      true ->
-        Enum.random(@greeting_neutral)
+        true ->
+          Enum.random(@greeting_neutral)
+      end
     end
   end
 
   defp plan_core(%SemanticInput{intent: :farewell}), do: @farewell_msg
 
   defp plan_core(%SemanticInput{intent: :insult, mood: mood}) do
-    case mood do
-      :grumpy   -> Enum.random(@snarky_boundaries)
-      :negative -> Enum.random(@firm_boundaries)
-      _         -> Enum.random(@gentle_boundaries)
+    if forgiven?() do
+      # We just accepted an apology — keep it de-escalated
+      "We just reset—let’s keep it productive. How can I help?"
+    else
+      case mood do
+        :grumpy   -> Enum.random(@snarky_boundaries)
+        :negative -> Enum.random(@firm_boundaries)
+        _         -> Enum.random(@gentle_boundaries)
+      end
     end
   end
 
@@ -368,8 +376,8 @@ defmodule Core.ResponsePlanner do
   end
 
   # 3) Keyword-based generic fallback (after explicit handlers)
-  defp plan_core(%SemanticInput{keyword: kw} = sem) when not is_nil(kw) do
-    plan_by_keyword(sem.intent, sem.confidence, kw)
+  defp plan_core(%SemanticInput{keyword: kw} = _sem) when not is_nil(kw) do
+    plan_by_keyword(_sem.intent, _sem.confidence, kw)
   end
 
   # 4) Low-confidence or unknown

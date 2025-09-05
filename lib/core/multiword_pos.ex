@@ -1,151 +1,123 @@
 defmodule Core.MultiwordPOS do
   @moduledoc """
-  Canonical multiword expressions → POS tags.
+  Multiword POS lookup + phrase inventory for the MultiwordMatcher.
 
-  Notes:
-  - All phrases are stored lowercase and space-normalized.
-  - `lookup/1` normalizes input and handles common WH contractions like "what's" → "what is".
-  - Keep tags simple and compatible with your POSEngine:
-      * greetings/thanks/farewells → :interjection
-      * wh-questions → :wh
-      * polite particles → :particle
-      * utility/common phrases → a single, reasonable tag (:verb, :noun, etc.)
+  - `lookup/1` returns a POS atom or nil.
+  - `phrases/0` returns normalized phrases that the matcher should index.
+
+  Covers:
+    * Greetings: hello/hi/hey/yo/greetings/howdy/sup (+ optional “there”).
+    * Greeting MWEs: “good morning/afternoon/evening”.
+    * Courtesy/thanks: "thank you", "thanks a lot", "please and thank you".
+    * WH: single words (what/when/where/who/why/how) and “what is”, “where is”,
+          “who is”, “what time”, “how much” (+ contraction expansion).
+    * Command-ish: “help”, “help me/with/out”, “please help”, “help please”.
+    * Word-boundary prefix (“where is …” won’t match “where isthmus …”).
   """
 
-  @type tag :: atom()
-  @type phrase :: String.t()
+  @greetings ~w(hello hi hey yo greetings howdy sup)
 
-  # --- Base entries (phrase -> [tags]) -----------------------------------------
+  # phrase -> POS
+  @phrase_pos %{
+    # greetings (MWEs)
+    "good morning"         => :interjection,
+    "good afternoon"       => :interjection,
+    "good evening"         => :interjection,
 
-  @entries [
-    # Greetings
-    {"good morning", [:interjection]},
-    {"good afternoon", [:interjection]},
-    {"good evening", [:interjection]},
-    {"good day", [:interjection]},
-    {"good to see you", [:interjection]},
-    {"how are you", [:interjection]},
+    # thanks / courtesy
+    "thank you"            => :interjection,
+    "thanks a lot"         => :interjection,
+    "please and thank you" => :particle,
 
-    # Thanks / courtesy
-    {"thank you", [:interjection]},
-    {"thanks a lot", [:interjection]},
-    {"much appreciated", [:interjection]},
-    {"please help", [:particle]},
-    {"please and thank you", [:particle]},
+    # WH phrases
+    "what is"              => :wh,
+    "where is"             => :wh,
+    "who is"               => :wh,
+    "what time"            => :wh,
+    "how much"             => :wh,
 
-    # Farewells
-    {"see you", [:interjection]},
-    {"see you later", [:interjection]},
-    {"talk to you later", [:interjection]},
-    {"take care", [:interjection]},
-    {"see ya", [:interjection]},
+    # command-ish
+    "help"                 => :verb,
+    "help me"              => :verb,
+    "help with"            => :verb,
+    "help out"             => :verb,
+    "please help"          => :verb,
+    "help please"          => :verb
+  }
 
-    # WH question starters
-    {"what time", [:wh]},
-    {"what is", [:wh]},
-    {"what are", [:wh]},
-    {"what's the time", [:wh]}, # contraction variant kept for clarity
-    {"how much", [:wh]},
-    {"how many", [:wh]},
-    {"how long", [:wh]},
-    {"how far",  [:wh]},
-    {"how old",  [:wh]},
-    {"how do i", [:wh]},
-    {"where is", [:wh]},
-    {"where are", [:wh]},
-    {"who is",   [:wh]},
-    {"who are",  [:wh]},
-    {"when is",  [:wh]},
-    {"when will",[:wh]},
-    {"why is",   [:wh]},
-    {"why are",  [:wh]},
-    {"which one",[:wh]},
-
-    # Common command-ish patterns
-    {"open settings", [:verb]},
-    {"turn on", [:verb]},
-    {"turn off", [:verb]},
-    {"log out", [:verb]},
-    {"shut down", [:verb]},
-    {"sign in", [:verb]},
-    {"sign up", [:verb]},
-
-    # Time/date chunks
-    {"this morning", [:noun]},
-    {"this afternoon", [:noun]},
-    {"this evening", [:noun]},
-    {"tonight", [:noun]},
-    {"tomorrow morning", [:noun]},
-    {"next week", [:noun]},
-
-    # Price / weather patterns
-    {"what is the weather", [:wh]},
-    {"what's the weather",  [:wh]},
-    {"what is the price",   [:wh]},
-    {"what's the price",    [:wh]}
-  ]
-
-  # --- Build map and phrase list ----------------------------------------------
-
-  @map Map.new(@entries)
-  @phrases Map.keys(@map)
-
-  @doc "All supported phrases (lowercase, normalized)."
-  @spec phrases() :: [phrase()]
-  def phrases, do: @phrases
-
-  @doc """
-  Lookup a phrase → list of POS tags.
-
-  Normalizes input:
-  - lowercase + space collapse
-  - WH contractions like “what’s/where’s/who’s/how’s/when’s/why’s” → “what is/…”
-  - Falls back to prefix match: if input starts with a known phrase + space, returns that phrase's tags.
-
-  Returns [] when no mapping is found.
-  """
-  @spec lookup(String.t()) :: [tag()]
+  @doc "Return a POS atom or nil for the given phrase/sentence."
+  @spec lookup(String.t()) :: atom() | nil
   def lookup(phrase) when is_binary(phrase) do
-    norm     = normalize(phrase)
-    expanded = expand_wh_contractions(norm)
+    norm =
+      phrase
+      |> normalize()
+      |> expand_contractions()
+      |> strip_trailing_punct()
+      |> squish()
 
-    direct =
-      Map.get(@map, norm) ||
-      Map.get(@map, expanded)
+    cond do
+      # single-word greeting or greeting + 'there'
+      Regex.match?(~r/^(hello|hi|hey|yo|greetings|howdy|sup)(\s+there)?$/u, norm) ->
+        :interjection
 
-    case direct do
-      nil ->
-        prefix_lookup(norm) ||
-        prefix_lookup(expanded) ||
-        []
-      tags ->
-        tags
+      # single-word WH or exact short WH starters
+      Regex.match?(~r/^(what|when|where|who|why|how)(\s+(is|are|time|much))?$/u, norm) ->
+        :wh
+
+      # flexible command-ish “help …”
+      Regex.match?(~r/^(please\s+)?(help|assist|support)(\s+(me|with|out|please))?$/u, norm) ->
+        :verb
+
+      # exact phrase table
+      Map.has_key?(@phrase_pos, norm) ->
+        Map.fetch!(@phrase_pos, norm)
+
+      true ->
+        # prefix phrase with word boundary, e.g., "where is the station"
+        # (requires a space after the phrase; avoids "where isthmus …")
+        prefixed_phrase_pos(norm)
     end
   end
 
-  # --- Normalization & contraction helpers -------------------------------------
+  def lookup(_), do: nil
 
-  @spec normalize(String.t()) :: String.t()
-  defp normalize(s) do
-    s
-    |> :unicode.characters_to_nfc_binary()
-    |> String.downcase()
-    |> String.replace(~r/\s+/u, " ")
-    |> String.trim()
-  end
+  @doc "List of normalized phrases for the matcher to index."
+  @spec phrases() :: [String.t()]
+  def phrases, do: Map.keys(@phrase_pos)
 
-  @spec prefix_lookup(String.t()) :: [tag()] | nil
-  defp prefix_lookup(s) do
-    Enum.find_value(@map, fn {k, tags} ->
-      if s == k or String.starts_with?(s, k <> " "), do: tags, else: nil
+  # ---------- helpers ----------
+
+  defp prefixed_phrase_pos(norm) do
+    Map.keys(@phrase_pos)
+    |> Enum.sort_by(&String.length/1, :desc)
+    |> Enum.find_value(fn p ->
+      if String.starts_with?(norm, p <> " ") do
+        Map.fetch!(@phrase_pos, p)
+      else
+        nil
+      end
     end)
   end
 
-  @doc false
-  @spec expand_wh_contractions(String.t()) :: String.t()
-  defp expand_wh_contractions(s) do
-    # what’s/what's -> what is, where’s -> where is, who’s -> who is, how’s -> how is, etc.
-    Regex.replace(~r/\b(what|where|who|how|when|why)[’']s\b/u, s, "\\1 is")
+  defp normalize(s) when is_binary(s), do: String.downcase(String.trim(s))
+  defp normalize(_), do: ""
+
+  defp squish(s), do: String.replace(s, ~r/[[:space:]]+/, " ")
+
+  # tolerate trailing punctuation like "hi!!!", "help?", "thanks a lot."
+  defp strip_trailing_punct(s), do: String.replace(s, ~r/[\s]*[!?,;:…\.]+$/u, "")
+
+  # expand curly/straight apostrophes in common WH contractions
+  defp expand_contractions(s) do
+    s
+    |> String.replace("what’s",  "what is")
+    |> String.replace("what's",  "what is")
+    |> String.replace("where’s", "where is")
+    |> String.replace("where's","where is")
+    |> String.replace("who’s",   "who is")
+    |> String.replace("who's",   "who is")
+    |> String.replace("how’s",   "how is")
+    |> String.replace("how's",   "how is")
   end
 end
 

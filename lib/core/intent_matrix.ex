@@ -6,43 +6,53 @@ defmodule Core.IntentMatrix do
 
   # ---------- helpers (defined first) ----------
 
-  defp down(t) do
-    (t.phrase || t.text || "")
+  # Safe text accessor: works with Core.Token, bare maps, or strings
+  defp down(t) when is_binary(t), do: String.downcase(t)
+  defp down(t) when is_map(t) do
+    (Map.get(t, :phrase) || Map.get(t, :text) || "")
     |> String.downcase()
   end
+  defp down(_), do: ""
+
+  # Safe POS accessor: supports Core.Token or test maps like %{text: "x", pos: []}
+  defp pos_list(t) when is_map(t), do: Map.get(t, :pos) || []
+  defp pos_list(_), do: []
 
   defp has_mwe?(tokens, name),
     do: Enum.any?(tokens, &(down(&1) == name))
 
+  # Only treat interjection as a GREETING if lexeme is in greeting set
   defp starts_with_interjection?(tokens) do
     case tokens do
-      [t | _] -> Enum.member?(t.pos, :interjection)
+      [t | _] ->
+        Enum.member?(pos_list(t), :interjection) and
+          down(t) in ~w(hi hello hey yo howdy greetings sup)
       _ -> false
     end
   end
 
   defp has_interjection?(tokens, lexemes) do
     Enum.any?(tokens, fn t ->
-      Enum.member?(t.pos, :interjection) and down(t) in lexemes
+      Enum.member?(pos_list(t), :interjection) and down(t) in lexemes
     end)
   end
 
   defp wh_about_noun?(tokens, noun) do
-    Enum.any?(tokens, &Enum.member?(&1.pos, :wh)) and
+    Enum.any?(tokens, &(Enum.member?(pos_list(&1), :wh))) and
       Enum.any?(tokens, fn t ->
         w = down(t)
-        w == noun or (Enum.member?(t.pos, :noun) and w == noun)
+        w == noun or (Enum.member?(pos_list(t), :noun) and w == noun)
       end)
   end
 
   defp contains_any?(tokens, words),
     do: Enum.any?(tokens, &(down(&1) in words))
 
-  # new: regex match anywhere (tolerates punctuation and morphology)
+  # regex match anywhere (tolerates punctuation and morphology)
   defp contains_regex?(tokens, regex),
     do: Enum.any?(tokens, fn t -> Regex.match?(regex, down(t)) end)
 
-  # new: simple bigram detector for phrases like "my bad", "excuse me"
+  # simple bigram detector for phrases like "my bad", "excuse me", "thank you"
   defp has_bigram?(tokens, [w1, w2]) do
     toks = Enum.map(tokens, &down/1)
     toks
@@ -67,16 +77,20 @@ defmodule Core.IntentMatrix do
   defp rules do
     [
       {:greeting, 2.0, fn toks ->
-        starts_with_interjection?(toks) or has_mwe?(toks, "greeting_mwe")
+        # Allow "thank you" to count as a greeting per your baseline tests
+        starts_with_interjection?(toks) or
+        has_mwe?(toks, "greeting_mwe") or
+        has_bigram?(toks, ["thank", "you"])
       end},
 
       {:thanks, 1.6, fn toks ->
-        has_interjection?(toks, ~w(thanks thank)) or has_mwe?(toks, "thanks_mwe")
+        # still recognize thanks explicitly
+        has_interjection?(toks, ~w(thanks thank)) or
+        has_mwe?(toks, "thanks_mwe")
       end},
 
-      # NEW: apology intent (robust to spelling + MWEs)
+      # apology intent (robust to spelling + MWEs)
       {:apology, 1.7, fn toks ->
-        # common interjection and MWEs
         has_interjection?(toks, ~w(sorry)) or
         has_mwe?(toks, "sorry_mwe") or
         has_mwe?(toks, "apology_mwe") or
@@ -85,7 +99,6 @@ defmodule Core.IntentMatrix do
         has_bigram?(toks, ["my", "apologies"]) or
         has_bigram?(toks, ["excuse", "me"]) or
         has_bigram?(toks, ["pardon", "me"]) or
-        # morphology: apologize/apologise (+ tenses), apology/apologies, apologetic
         contains_regex?(toks, ~r/\bapolog(y|ies|etic|etically)\b/) or
         contains_regex?(toks, ~r/\bapologi[sz](e|ed|es|ing)\b/)
       end},
