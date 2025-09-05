@@ -2,11 +2,10 @@ defmodule Core.IntentClassifier do
   @moduledoc """
   Determines user intent using weighted POS patterns + lexical bonuses
   with top-2 margin confidence and keyword extraction.
-
-  Small overrides:
+  Includes small post-classification overrides for:
     * deny:  "no" / "nope" / "nah"
-    * greet: sentences starting with "thank you" (but not when tokens contain `thanks_mwe`)
   """
+
   alias Core.POS
 
   @intent_patterns %{
@@ -92,10 +91,6 @@ defmodule Core.IntentClassifier do
   @bye_lex    ~w(bye goodbye later cya farewell)
   @deny_lex   ~w(no nope nah)
 
-  @doc """
-  Classifies intent based on weighted patterns, bonuses, and top-2 margin confidence.
-  Adds :intent (atom), :confidence (0..1), :keyword (string | nil), :source (:classifier).
-  """
   def classify_tokens(%{token_structs: token_structs} = struct) do
     pos_lists = Enum.map(token_structs, & &1.pos)
     combos    = POS.cartesian_product(pos_lists)
@@ -132,20 +127,28 @@ defmodule Core.IntentClassifier do
     do: Enum.any?(patterns, &(&1 in combos))
 
   defp bonus_for_intent(:greet, token_structs, texts) do
-    greetingish =
-      Enum.any?(texts, &(&1 in ~w(hi hello hey yo sup))) or
-      has_mwe?(token_structs, "greeting_mwe")
+    # If it's a "thank you" start, don't award greet bonus
+    if thank_you_start?(token_structs, texts) do
+      0.0
+    else
+      greetingish =
+        Enum.any?(texts, &(&1 in ~w(hi hello hey yo sup))) or
+        has_mwe?(token_structs, "greeting_mwe")
 
-    cond do
-      greetingish and match_first?(token_structs, :interjection) -> 0.7
-      greetingish -> 0.5
-      true -> 0.0
+      cond do
+        greetingish and match_first?(token_structs, :interjection) -> 0.7
+        greetingish -> 0.5
+        true -> 0.0
+      end
     end
   end
 
   defp bonus_for_intent(:thank, toks, texts) do
-    if Enum.any?(texts, &(&1 in @thanks_lex)) or has_mwe?(toks, "thanks_mwe"),
-      do: 0.7, else: 0.0
+    cond do
+      thank_you_start?(toks, texts) -> 0.95   # win ties vs greet (2.35 > 2.30)
+      Enum.any?(texts, &(&1 in @thanks_lex)) or has_mwe?(toks, "thanks_mwe") -> 0.7
+      true -> 0.0
+    end
   end
 
   defp bonus_for_intent(:bye, _toks, texts) do
@@ -209,11 +212,10 @@ defmodule Core.IntentClassifier do
     if top <= 0.0 do
       rescue_decide(token_structs, texts, pos_lists)
     else
-      second =
-        case rest do
-          [{_, s} | _] -> s
-          _ -> 0.0
-        end
+      second = case rest do
+        [{_, s} | _] -> s
+        _ -> 0.0
+      end
 
       margin = max(top - second, 0.0)
 
@@ -232,7 +234,6 @@ defmodule Core.IntentClassifier do
 
   defp rescue_decide(_toks, texts, pos_lists) do
     insult = Enum.any?(texts, &(&1 in @insult_lex))
-
     questionish =
       Enum.any?(List.flatten(pos_lists), &(&1 == :wh)) or
       Enum.any?(texts, &String.ends_with?(&1, "?"))
@@ -277,7 +278,7 @@ defmodule Core.IntentClassifier do
 
   # ---------- post-classification overrides ----------
 
-  defp apply_overrides(%{sentence: _} = sem, toks, _texts) do
+  defp apply_overrides(%{sentence: _} = sem, _toks, texts) do
     s =
       (Map.get(sem, :original_sentence) || Map.get(sem, :sentence) || "")
       |> to_string()
@@ -285,18 +286,10 @@ defmodule Core.IntentClassifier do
       |> String.trim()
 
     cond do
-      # clear negatives → :deny
       s in @deny_lex ->
         %{sem | intent: :deny, keyword: nil,
                 confidence: max(sem.confidence || 0.0, 0.85),
                 source: :classifier}
-
-      # “thank you …” → greet only when we DIDN’T get thanks_mwe from tokenizer
-      String.starts_with?(s, "thank you") and not has_mwe?(toks, "thanks_mwe") ->
-        %{sem | intent: :greet, keyword: "thank you",
-                confidence: max(sem.confidence || 0.0, 0.6),
-                source: :classifier}
-
       true ->
         sem
     end
@@ -326,7 +319,6 @@ defmodule Core.IntentClassifier do
 
   defp starts_with_any_pos?([t | _], tags),
     do: Enum.any?(tags, fn tag -> Enum.member?(t.pos, tag) end)
-
   defp starts_with_any_pos?(_, _), do: false
 
   defp ends_with_qmark?(texts) do
@@ -340,5 +332,18 @@ defmodule Core.IntentClassifier do
     do: Enum.any?(tokens, fn t ->
       String.downcase(t.phrase || t.text || "") == mwe_name
     end)
+
+  defp thank_you_start?(token_structs, texts) do
+    first_two = texts |> Enum.take(2) |> Enum.join(" ")
+    mwe_first =
+      case token_structs do
+        [%{phrase: p, text: t} | _] ->
+          w = (p || t || "") |> String.downcase() |> String.trim()
+          w in ["thanks_mwe", "thank you", "thanks", "thankyou"]
+        _ -> false
+      end
+
+    mwe_first or String.starts_with?(first_two, "thank you")
+  end
 end
 
