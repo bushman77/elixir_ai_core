@@ -1,114 +1,159 @@
 defmodule Core.MultiwordMatcher do
   @moduledoc """
-  Finds and merges known multiword expressions (MWEs) in a token stream.
-  Also exposes POS overrides for merged phrases.
+  Merge known Multi-Word Expressions (MWEs) into a single %Core.Token{} safely.
 
-  Sources:
-    • Core.MultiwordPOS.phrases/0 is the single source of truth.
-  Caching:
-    • Builds a first-token index once and caches it in :persistent_term.
-    • Call refresh!/0 after you modify phrase inventories.
+  - Accepts tokens as %Core.Token{} or raw binaries; coerces to tokens.
+  - Only merges multi-word phrases (length >= 2).
+  - Always advances the scan index (no hangs like "hello there").
+  - Uses Core.MultiwordPOS for phrases and coarse POS.
+  - Caches index with :persistent_term.
   """
 
-  alias Core.MultiwordPOS
+  alias Core.{Token, MultiwordPOS}
 
-  @cache_key {__MODULE__, :index}
+  @pt_key {__MODULE__, :index}
 
-  # ── Public API ────────────────────────────────────────────────────────────────
-
-  @doc "All known phrases (lowercase, space-normalized)."
-  @spec get_phrases() :: [binary()]
-  def get_phrases, do: MultiwordPOS.phrases()
-
-  @doc "POS override for a merged phrase (list of tags, [] if none)."
-  @spec pos_override(binary()) :: [atom()]
-  def pos_override(phrase) when is_binary(phrase) do
-    MultiwordPOS.lookup(String.downcase(phrase)) || []
-  end
+  # ---------- public API ----------
 
   @doc """
-  Merge a list of **downcased** words into phrases using longest-match-first.
-  Returns a list of strings where matched MWEs appear as a single element.
+  Refresh the cached index from MultiwordPOS phrases. Idempotent.
   """
-  @spec merge_words([binary()]) :: [binary()]
-  def merge_words(words) when is_list(words) do
-    {first_map, _maxlen, _sig} = index()
-    do_merge(words, first_map, [])
-  end
-
-  @doc """
-  Rebuild the cached index. Call after seeding/enrichment.
-  """
-  @spec refresh!() :: :ok
   def refresh! do
-    phrases = get_phrases()
+    phrases =
+      MultiwordPOS.phrases()
+      |> Enum.map(&String.downcase/1)
+      |> Enum.map(&String.trim/1)
+      |> Enum.uniq()
 
-    # signature guards against stale cache if phrases change
-    sig =
-      :erlang.phash2(phrases)
-
-    tuples =
+    # Only multi-word phrases are candidates for merging
+    mwes =
       phrases
-      |> Enum.map(fn p ->
-        parts = String.split(p, ~r/\s+/, trim: true)
-        {p, parts, length(parts)}
-      end)
-
-    maxlen = Enum.reduce(tuples, 1, fn {_p, _parts, len}, acc -> max(acc, len) end)
+      |> Enum.filter(&String.contains?(&1, " "))
+      |> Enum.map(&String.split(&1, " "))
 
     first_map =
-      tuples
-      |> Enum.group_by(fn {_p, parts, _len} -> hd(parts) end)
-      |> Map.new(fn {first, lst} ->
-        # longest-first to prefer most specific match
-        {first, Enum.sort_by(lst, fn {_p, _parts, len} -> -len end)}
+      mwes
+      |> Enum.reduce(%{}, fn words = [first | _], acc ->
+        Map.update(acc, first, [words], fn list -> [words | list] end)
+      end)
+      |> Enum.into(%{}, fn {k, lists} ->
+        {k, Enum.sort_by(lists, &length/1, :desc)} # longest-first
       end)
 
-    :persistent_term.put(@cache_key, {first_map, maxlen, sig})
+    maxlen = Enum.reduce(mwes, 0, fn w, acc -> max(acc, length(w)) end)
+    :persistent_term.put(@pt_key, {first_map, maxlen})
     :ok
   end
 
-  # ── Internal ─────────────────────────────────────────────────────────────────
-
-  defp index do
-    case :persistent_term.get(@cache_key, :missing) do
+  @doc """
+  Return the cached index; builds it on first call.
+  """
+  def index do
+    case :persistent_term.get(@pt_key, :missing) do
       :missing ->
         refresh!()
-        :persistent_term.get(@cache_key)
+        :persistent_term.get(@pt_key)
 
-      {first_map, maxlen, sig} = cached ->
-        # If phrases changed (dev), rebuild automatically
-        if sig != :erlang.phash2(get_phrases()) do
-          refresh!()
-          :persistent_term.get(@cache_key)
-        else
-          cached
-        end
+      tuple ->
+        tuple
     end
   end
 
-  defp do_merge([], _first_map, acc), do: Enum.reverse(acc)
+  @doc """
+  Merge known multi-word phrases into single tokens.
 
-  defp do_merge([w | rest] = words, first_map, acc) do
-    case Map.get(first_map, w) do
-      nil ->
-        do_merge(rest, first_map, [w | acc])
+  Guarantees forward progress and never tries to merge single words.
+  Accepts a list of %Core.Token{} or binaries.
+  """
+  def merge_words([]), do: []
+  def merge_words(tokens) when is_list(tokens) do
+    tokens = Enum.map(tokens, &coerce_token/1)
+    {first_map, _maxlen} = index()
 
-      candidates ->
-        case try_match(words, candidates) do
-          {:ok, phrase, skip} ->
-            do_merge(Enum.drop(words, skip), first_map, [phrase | acc])
+    words = Enum.map(tokens, &token_norm_text/1)
+    do_merge(tokens, words, first_map, 0, [])
+  end
 
-          :nomatch ->
-            do_merge(rest, first_map, [w | acc])
-        end
+  @doc """
+  Optional single-token POS override for the Tokenizer.
+
+  If a single token is a known phrase in MultiwordPOS (e.g., "hello", "please", "what"),
+  return a one-element POS list like [:interjection] / [:particle] / [:wh]. Otherwise nil.
+  """
+  @spec pos_override(binary()) :: [atom()] | nil
+ # Accept either a %Core.Token{} or a binary; fall back to nil for anything else.
+# Returns a single-element POS list (e.g., [:interjection]) or nil.
+def pos_override(%Core.Token{} = t) do
+  s = (t.phrase || t.text || "") |> to_string()
+  pos_override(s)
+end
+
+def pos_override(token) when is_binary(token) do
+  case Core.MultiwordPOS.lookup(token) do
+    nil -> nil
+    tag -> [tag]
+  end
+end
+
+def pos_override(_), do: nil
+ 
+  # ---------- internal: merge loop ----------
+
+  defp do_merge(tokens, words, first_map, i, acc) do
+    n = length(tokens)
+
+    if i >= n do
+      Enum.reverse(acc)
+    else
+      t = :lists.nth(i + 1, tokens)   # 1-based
+      w = :lists.nth(i + 1, words)
+
+      candidates = Map.get(first_map, w, [])
+
+      case longest_match_len(words, i, candidates) do
+        l when is_integer(l) and l >= 2 ->
+          phrase_words = Enum.slice(words, i, l)
+          phrase = Enum.join(phrase_words, " ")
+
+          pos =
+            case MultiwordPOS.lookup(phrase) do
+              nil -> []
+              tag -> [tag]
+            end
+
+          merged = %Token{t | phrase: phrase, pos: pos}
+          do_merge(tokens, words, first_map, i + l, [merged | acc])
+
+        _ ->
+          do_merge(tokens, words, first_map, i + 1, [t | acc])
+      end
     end
   end
 
-  defp try_match(words, candidates) do
-    Enum.find_value(candidates, :nomatch, fn {phrase, parts, len} ->
-      if Enum.take(words, len) == parts, do: {:ok, phrase, len}, else: false
+  defp longest_match_len(words, i, candidates) do
+    Enum.find_value(candidates, fn cand_words ->
+      if slice_eq?(words, i, cand_words), do: length(cand_words), else: nil
     end)
+  end
+
+  defp slice_eq?(words, i, pattern_words) do
+    Enum.zip(pattern_words, Enum.slice(words, i, length(pattern_words)))
+    |> Enum.all?(fn {a, b} -> a == b end)
+  end
+
+  # ---------- coercion & normalization ----------
+
+  # Accept both %Token{} and binaries; coerce to %Token{}
+  defp coerce_token(%Token{} = t), do: t
+  defp coerce_token(s) when is_binary(s), do: %Token{text: s, pos: []}
+  defp coerce_token(other), do: %Token{text: to_string(other), pos: []}
+
+  # Normalized token text for matching (phrase if present else text)
+  defp token_norm_text(%Token{} = t) do
+    (t.phrase || t.text || "")
+    |> to_string()
+    |> String.downcase()
+    |> String.trim()
   end
 end
 

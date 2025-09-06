@@ -11,49 +11,31 @@ defmodule Core.SemanticInput do
   @type llm_model_t :: String.t() | nil
   @type llm_system_t :: String.t() | nil
 
-  # NEW: orthogonal speech-act axis
+  # Orthogonal speech-act annotations
   @type speech_act_t :: :question | :statement | :command | :fragment | :exclamation | atom() | nil
   @type question_kind_t :: :wh | :polar | :choice | :elliptical | :rhetorical | atom() | nil
 
   @type t :: %__MODULE__{
-          # Preserve exact user text
           original_sentence: String.t() | nil,
-          # Normalized/processed sentence used by the pipeline
           sentence: String.t() | nil,
-
-          # Tokens and rich token data
           tokens: [String.t()],
           token_structs: [Token.t()],
-
-          # Brain / POS context
           cells: [BrainCell.t()] | list(),
           pos_list: list(),
-
-          # Predicted labels
           intent: intent_t,
           keyword: String.t() | nil,
           confidence: float() | nil,
           mood: mood_t,
-
-          # Supervision (gold) labels
           gold_intent: atom() | String.t() | nil,
-
-          # Matcher + planning context
           phrase_matches: [String.t()],
           source: source_t,
           activation_summary: map() | nil,
           pattern_roles: map(),
-
-          # Response planning/runtime conveniences
           cell: BrainCell.t() | map() | nil,
           response: String.t() | nil,
           planned_response: String.t() | nil,
-
-          # NEW: speech-act annotations (form, not meaning)
           speech_act: speech_act_t,
           question_kind: question_kind_t,
-
-          # ── LLM session state ─────────────────────────────────────────────
           llm_ctx: llm_ctx_t,
           llm_model: llm_model_t,
           llm_system: llm_system_t
@@ -78,27 +60,61 @@ defmodule Core.SemanticInput do
     :cell,
     :response,
     :planned_response,
-    # NEW
     :speech_act,
     :question_kind,
-    # LLM
     :llm_ctx,
     :llm_model,
     :llm_system
   ]
 
-  # Keep your existing sanitize
-  def sanitize(%__MODULE__{token_structs: toks} = input) do
-    pruned =
-      toks
-      |> Enum.reject(&(&1.source in [:console, :command, :debug]))
-      |> Enum.reject(&(&1.phrase =~ ~r/^\s*$/))
+  # ------------------------------------------------------------------------
+  # SAFE sanitize: only operate on strings; keep token_structs as tokens
+  # ------------------------------------------------------------------------
+  def sanitize(%__MODULE__{} = sem) do
+    # Ensure we have token structs; if only strings exist, wrap them.
+    token_structs =
+      case sem.token_structs do
+        list when is_list(list) and list != [] -> list
+        _ -> Enum.map(sem.tokens || [], &to_token_struct/1)
+      end
 
-    %{input | token_structs: pruned}
+    pruned_structs =
+      token_structs
+      |> Enum.reject(&token_from_console?/1)
+      |> Enum.reject(fn t ->
+        s = token_string(t)
+        blank_str?(s)
+      end)
+
+    cleaned_tokens =
+      pruned_structs
+      |> Enum.map(&token_string/1)
+      |> Enum.map(&String.trim/1)
+
+    %__MODULE__{sem | token_structs: pruned_structs, tokens: cleaned_tokens}
   end
 
   # Convenience: set speech-act pair
   def with_speech_act(%__MODULE__{} = si, {sa, kind}),
     do: %{si | speech_act: sa, question_kind: kind}
+
+  # ------------------------------------------------------------------------
+  # Helpers
+  # ------------------------------------------------------------------------
+
+  # Always extract a string from a token/thing
+  defp token_string(%Token{} = t), do: (t.phrase || t.text || "")
+  defp token_string(s) when is_binary(s), do: s
+  defp token_string(other), do: Kernel.to_string(other)
+
+  defp blank_str?(s) when is_binary(s), do: s == "" or Regex.match?(~r/^\s*$/, s)
+  defp blank_str?(_), do: true
+
+  defp token_from_console?(%Token{source: src}), do: src in [:console, :command, :debug]
+  defp token_from_console?(_), do: false
+
+  defp to_token_struct(%Token{} = t), do: t
+  defp to_token_struct(s) when is_binary(s), do: %Token{text: s, pos: []}
+  defp to_token_struct(other), do: %Token{text: Kernel.to_string(other), pos: []}
 end
 

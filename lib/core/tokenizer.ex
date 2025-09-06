@@ -1,9 +1,9 @@
 defmodule Core.Tokenizer do
   @moduledoc """
   Tokenizer that:
-    • normalizes + decontracts input
+    • canonicalizes + normalizes input
     • greedily merges known multiword phrases (longest match first)
-    • emits %Core.Token{} structs with position/source metadata
+    • emits %Core.Token{} structs (POS starts empty; filled later by POS engine)
 
   Accepts either a raw sentence (binary) or a %Core.SemanticInput{}.
   """
@@ -49,60 +49,38 @@ defmodule Core.Tokenizer do
   end
 
   # ── Internal ─────────────────────────────────────────────────────────────────
-# at top of file
 
-defp do_tokenize(sentence, source) when sentence in ["", " "], do: {[], []}
-defp do_tokenize(sentence, source) do
-  {us_split, words} =
-    :timer.tc(fn ->
-      sentence
-      |> String.split(~r/\s+/, trim: true)
-      |> Enum.map(&Contractions.canonicalize/1)
-    end)
-
-  {us_merge, merged} = :timer.tc(fn -> Core.MultiwordMatcher.merge_words(words) end)
-
-  token_structs =
-    merged
-    |> Enum.with_index()
-    |> Enum.map(fn {phrase, index} ->
-      %Token{
-        phrase: phrase, text: phrase, position: index, source: source,
-        pos: Core.MultiwordMatcher.pos_override(phrase)
-      }
-    end)
-
-  Logger.debug("TOKENIZE split=#{div(us_split,1000)}ms merge=#{div(us_merge,1000)}ms in=#{inspect words} out=#{inspect merged}")
-  {Enum.map(token_structs, & &1.phrase), token_structs}
-end
-
-  @spec do_tokenize(binary(), atom()) :: {[String.t()], [Token.t()]}
-  defp do_tokenize(sentence, _source) when sentence in ["", " "], do: {[], []}
-
-  defp do_tokenize(sentence, source) do
+# keep ONE version of this function in the file
+@spec do_tokenize(binary(), atom()) :: {[String.t()], [Token.t()]}
+defp do_tokenize(sentence, source) when is_binary(sentence) do
+  # handle empty/whitespace input without using a guard
+  if String.trim(sentence) == "" do
+    {[], []}
+  else
     words =
       sentence
       |> String.split(~r/\s+/, trim: true)
-      |> Enum.map(&Contractions.canonicalize/1) # e.g., "im" -> "i'm"
+      |> Enum.map(&Contractions.canonicalize/1)
 
-    merged = MultiwordMatcher.merge_words(words)
+    merged = Core.MultiwordMatcher.merge_words(words)
 
     token_structs =
       merged
       |> Enum.with_index()
       |> Enum.map(fn {phrase, index} ->
-        %Token{
+        %Core.Token{
           phrase: phrase,
           text: phrase,
           position: index,
           source: source,
           # tag functional phrases immediately; others stay [] for POSEngine
-          pos: MultiwordMatcher.pos_override(phrase)
+          pos: Core.MultiwordMatcher.pos_override(phrase)
         }
       end)
 
     {Enum.map(token_structs, & &1.phrase), token_structs}
   end
+end
 
   # ── Normalization ────────────────────────────────────────────────────────────
 
@@ -147,7 +125,9 @@ end
   @spec keep_word_internals(binary()) :: binary()
   defp keep_word_internals(s) do
     s
+    # drop hyphens/apostrophes only when *not* surrounded by letters/numbers
     |> String.replace(~r/(?<![\p{L}\p{N}])['-]|['-](?![\p{L}\p{N}])/u, "")
+    # keep decimal points in numbers; drop stray dots
     |> String.replace(~r/(?<!\p{N})\.(?!\p{N})/u, "")
   end
 

@@ -6,10 +6,10 @@ defmodule Core.MultiwordPOS do
     • Case/whitespace normalization (handles `"   Good   Morning  "`).
     • Curly/straight apostrophes normalization (handles “what’s the time”).
     • Exact match first, then prefix match with a *word boundary* so
-      `"where isthmus …"` does NOT trigger `"where is"`.
+      `"where isthmus …"` does **not** trigger `"where is"`.
   """
 
-  # Single-word WH starters should be exact-match only
+  # Single-word WH starters are exact-match only
   @wh_single ~w(what when where who why how)
 
   # Canonical, lowercase, single-spaced keys
@@ -41,18 +41,24 @@ defmodule Core.MultiwordPOS do
     "where's"              => :wh,
 
     "who is"               => :wh,
-    "who's"                => :wh,
     "who are"              => :wh,
+    "who's"                => :wh,
 
     "when is"              => :wh,
     "when will"            => :wh,
-
     "why is"               => :wh,
     "how much"             => :wh,
     "how many"             => :wh,
     "how long"             => :wh,
 
     # command-ish phrases (tests expect :verb)
+    "open settings"        => :verb,
+    "turn on"              => :verb,
+    "turn off"             => :verb,
+    "log out"              => :verb,
+    "sign in"              => :verb,
+    "sign up"              => :verb,
+
     "show"                 => :verb,
     "tell"                 => :verb,
     "give"                 => :verb,
@@ -66,12 +72,7 @@ defmodule Core.MultiwordPOS do
     "lookup"               => :verb,
     "show me"              => :verb,
     "tell me"              => :verb,
-    "give me"              => :verb,
-    "turn on"              => :verb,
-    "turn off"             => :verb,
-    "log out"              => :verb,
-    "sign in"              => :verb,
-    "sign up"              => :verb
+    "give me"              => :verb
   }
 
   @phrase_list @phrases |> Map.keys() |> Enum.sort()  # deterministic for tests
@@ -84,9 +85,9 @@ defmodule Core.MultiwordPOS do
 
   Order:
     1) exact match against @phrases
-    2) exact match for single-word WH starters
+    2) exact match for single-word WH starters (e.g., \"what\")
     3) prefix match with word boundary for all keys EXCEPT plain single-word WH
-       (we still allow contracted single-word WH like "what's", "where's").
+       (contracted single-word WH like \"what's\" and \"where's\" are allowed).
   """
   @spec lookup(binary() | nil) :: atom() | nil
   def lookup(nil), do: nil
@@ -94,9 +95,7 @@ defmodule Core.MultiwordPOS do
     norm = normalize(s)
 
     Map.get(@phrases, norm) ||
-      # exact match for plain single-word WH (no prefix use)
       if(norm in @wh_single, do: :wh, else:
-        # boundary prefix match for all other keys
         Enum.find_value(@phrase_list, fn key ->
           val = Map.fetch!(@phrases, key)
           if not plain_single_wh_key?(key, val) and boundary_match?(norm, key), do: val, else: nil
@@ -109,15 +108,15 @@ defmodule Core.MultiwordPOS do
   defp normalize(s) do
     s
     |> String.downcase()
-    |> String.replace(~r/[’‘]/u, "'") # curly -> straight apostrophes
+    |> String.replace(~r/[’‘]/u, "'") # curly → straight apostrophes
     |> String.replace(~r/\s+/, " ")
     |> String.trim()
   end
 
   defp plain_single_wh_key?(key, val) do
-    val == :wh and
-      not String.contains?(key, " ") and
-      not String.contains?(key, "'")
+    val == :wh and                 # it's a WH entry
+      not String.contains?(key, " ") and  # single word
+      not String.contains?(key, "'")      # NOT contracted (so "where", not "where's")
   end
 
   # Starts-with + next char must be a boundary (or end of string)
