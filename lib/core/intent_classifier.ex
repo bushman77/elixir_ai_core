@@ -7,11 +7,9 @@ defmodule Core.IntentClassifier do
     • deny for clear negatives ("no" / "nope" / "nah")
     • greeting for sentences that start with "thank you" (test expectation)
   """
-
   alias Core.POS
 
   # ---------- intent patterns & priors ----------
-
   @intent_patterns %{
     greet: [
       [:interjection, :noun],
@@ -91,7 +89,6 @@ defmodule Core.IntentClassifier do
   }
 
   # ---------- lexical bags ----------
-
   @thanks_lex ~w(thanks thank thx ty thankyou)
   @insult_lex ~w(fuck idiot stupid dumb asshole jerk)
   @bye_lex    ~w(bye goodbye later cya farewell)
@@ -106,9 +103,17 @@ defmodule Core.IntentClassifier do
   def classify_tokens(%{token_structs: token_structs} = struct) do
     toks = token_structs || []
 
-    # POS combos
-    pos_lists = Enum.map(toks, & &1.pos)
-    combos    = POS.cartesian_product(pos_lists)
+    # POS combos (robust when a token has nil/empty POS)
+    pos_lists =
+      for t <- toks do
+        case t.pos do
+          []  -> [:unknown]
+          nil -> [:unknown]
+          xs  -> xs
+        end
+      end
+
+    combos = POS.cartesian_product(pos_lists)
 
     # Prefer texts from tokens; fall back to normalized sentence if needed.
     texts0 = base_texts_from_tokens(toks)
@@ -160,7 +165,7 @@ defmodule Core.IntentClassifier do
 
   defp bonus_for_intent(:thank, toks, texts) do
     cond do
-      # This will be superseded by the override to "greeting" later if needed.
+      # This will be superseded by the override to "greet" later if needed.
       thank_you_start?(toks, texts) -> 0.95
       Enum.any?(texts, &(&1 in @thanks_lex)) or has_mwe?(toks, "thanks_mwe") -> 0.7
       true -> 0.0
@@ -228,10 +233,11 @@ defmodule Core.IntentClassifier do
     if top <= 0.0 do
       rescue_decide(token_structs, texts, pos_lists)
     else
-      second = case rest do
-        [{_, s} | _] -> s
-        _ -> 0.0
-      end
+      second =
+        case rest do
+          [{_, s} | _] -> s
+          _ -> 0.0
+        end
 
       margin = max(top - second, 0.0)
 
@@ -312,7 +318,8 @@ defmodule Core.IntentClassifier do
 
       # Treat “thank you …” as a greeting (per smoke test expectation)
       thank_you_start?(toks, texts) ->
-        %{sem | intent: :greeting, keyword: "thank you",
+        %{sem | intent: :greet,  # <- fixed from :greeting
+                keyword: "thank you",
                 confidence: max(sem.confidence || 0.0, 0.6),
                 source: :classifier}
 
@@ -323,11 +330,19 @@ defmodule Core.IntentClassifier do
 
   # ---------- utilities ----------
 
+  # Normalize any token-like thing to a trimmed string
+  defp token_to_text(%{phrase: p}) when is_binary(p) and byte_size(p) > 0, do: String.trim(p)
+  defp token_to_text(%{text: t})   when is_binary(t), do: String.trim(t)
+  defp token_to_text(t)            when is_binary(t), do: String.trim(t)
+  defp token_to_text(t)            when is_atom(t),   do: t |> Atom.to_string() |> String.trim()
+  defp token_to_text(t)            when is_number(t), do: t |> to_string() |> String.trim()
+  defp token_to_text(_), do: ""
+
   defp first_pos(tokens, pos_tag) do
     tokens
     |> Enum.find_value(fn t ->
       if Enum.member?(t.pos, pos_tag) do
-        (t.phrase || t.text || "") |> String.downcase()
+        token_to_text(t) |> String.downcase()
       else
         nil
       end
@@ -354,17 +369,20 @@ defmodule Core.IntentClassifier do
     end
   end
 
-  defp has_mwe?(tokens, mwe_name),
-    do: Enum.any?(tokens, fn t ->
-      String.downcase(t.phrase || t.text || "") == mwe_name
+  defp has_mwe?(tokens, mwe_name) do
+    target = String.downcase(mwe_name)
+    Enum.any?(tokens, fn t ->
+      v = token_to_text(t) |> String.downcase()
+      v != "" and v == target
     end)
+  end
 
   defp thank_you_start?(token_structs, texts) do
     first_two = texts |> Enum.take(2) |> Enum.join(" ")
     mwe_first =
       case token_structs do
-        [%{phrase: p, text: t} | _] ->
-          w = (p || t || "") |> String.downcase() |> String.trim()
+        [first | _] ->
+          w = token_to_text(first) |> String.downcase()
           w in ["thanks_mwe", "thank you", "thanks", "thankyou"]
         _ -> false
       end
@@ -376,11 +394,8 @@ defmodule Core.IntentClassifier do
 
   defp base_texts_from_tokens(token_structs) do
     token_structs
-    |> Enum.map(fn t ->
-      (t.phrase || t.text || "")
-      |> String.trim()
-      |> String.downcase()
-    end)
+    |> Enum.map(&token_to_text/1)
+    |> Enum.map(&String.downcase/1)
     |> Enum.reject(&(&1 == ""))
   end
 
