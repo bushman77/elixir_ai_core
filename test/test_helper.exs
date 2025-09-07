@@ -1,5 +1,7 @@
 ExUnit.start()
 
+{:ok, _} = Application.ensure_all_started(:elixir_ai_core)
+
 Code.ensure_compiled!(LexiconClient.Behavior)
 Mox.defmock(LexiconClientMock, for: LexiconClient.Behavior)
 

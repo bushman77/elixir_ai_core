@@ -19,6 +19,12 @@ defmodule Console do
   # -- GenServer Lifecycle --
 
   def init(:ok) do
+
+if is_nil(Process.whereis(Core.Registry)) do
+  {:ok, _} = Registry.start_link(keys: :unique, name: Core.Registry)
+end
+
+
     IO.puts("🧠 AI Brain Console started. Type anything to begin.")
     GenServer.cast(self(), :prompt)
     {:ok, %{}}
